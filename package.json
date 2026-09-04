@@ -1,0 +1,35 @@
+{
+  "name": "party-arcade",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "tsx scripts/generate-cert.ts",
+    "dev": "tsx server/index.ts",
+    "prebuild": "tsx scripts/generate-cert.ts",
+    "build": "vite build",
+    "prestart": "tsx scripts/generate-cert.ts",
+    "start": "cross-env NODE_ENV=production tsx server/index.ts",
+    "test": "vitest run",
+    "chaos-test": "tsx scripts/chaos-test.ts"
+  },
+  "dependencies": {
+    "cross-env": "^7.0.3",
+    "edge-tts-universal": "^1.4.0",
+    "node-forge": "^1.4.0",
+    "qrcode": "^1.5.4",
+    "simli-client": "^3.0.2",
+    "sirv": "^3.0.2",
+    "tsx": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/node-forge": "^1.3.14",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.5.13",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.9"
+  }
+}

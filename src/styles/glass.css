@@ -1,0 +1,286 @@
+.glass-panel {
+  position: relative;
+  background-color: var(--glass-bg);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--glass-tint) 16%, transparent), color-mix(in srgb, var(--glass-tint) 16%, transparent)),
+    linear-gradient(120deg, transparent 35%, var(--glass-sheen) 50%, transparent 65%);
+  background-size: 100% 100%, 240% 240%;
+  background-position: 0 0, 0% 0%;
+  background-repeat: no-repeat, no-repeat;
+  animation: liquid-sweep 10s ease-in-out infinite;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-shadow), var(--glass-shadow-tight), var(--glass-inner-glow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+}
+
+@keyframes liquid-sweep {
+  0%, 100% { background-position: 0 0, 0% 0%; }
+  50% { background-position: 0 0, 100% 100%; }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-panel,
+  .glass-card,
+  .glass-button,
+  .glass-pill {
+    background: #1c1c28;
+  }
+}
+
+.glass-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  /* Radial, not a fixed diagonal — centers on --light-x/--light-y so Pillar 2 can move it
+     with pointer position or device tilt. Left at the tokens.css default (50% 0%) this
+     still reads as a top-lit edge, just as it did as a static linear-gradient before. */
+  background: radial-gradient(140% 140% at var(--light-x) var(--light-y), var(--glass-highlight), transparent 55%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.5;
+  pointer-events: none;
+  transition: background 120ms linear;
+}
+
+.glass-panel::after,
+.glass-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  /* The thin rainbow sliver real Liquid Glass shows where the material grazes its
+     background — fixed near the bottom edge (matches the reference material regardless of
+     --light-x/--light-y), cool-to-warm through the middle, standing in for actual chromatic
+     dispersion. Same mask-composite ring trick as the highlight above, just a second layer. */
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg,
+    transparent 150deg,
+    var(--glass-dispersion-cool) 170deg,
+    var(--glass-dispersion-warm) 190deg,
+    transparent 210deg,
+    transparent 360deg
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Real optical refraction, progressive enhancement only — src/shared/glassRefraction.ts
+   flags the document with this class after actually probing that the browser applies a
+   url()-referenced SVG filter through backdrop-filter, which iOS Safari never does. Cuts
+   the plain blur back a bit since the displacement itself already reads as soft. */
+.glass-refraction-ok .glass-panel,
+.glass-refraction-ok .glass-card {
+  backdrop-filter: url(#glass-distortion) blur(calc(var(--glass-blur) * 0.6)) saturate(180%);
+  -webkit-backdrop-filter: url(#glass-distortion) blur(calc(var(--glass-blur) * 0.6)) saturate(180%);
+}
+
+.glass-card {
+  position: relative;
+  background-color: var(--glass-bg-strong);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--glass-tint) 16%, transparent), color-mix(in srgb, var(--glass-tint) 16%, transparent)),
+    linear-gradient(120deg, transparent 35%, var(--glass-sheen) 50%, transparent 65%);
+  background-size: 100% 100%, 240% 240%;
+  background-position: 0 0, 0% 0%;
+  background-repeat: no-repeat, no-repeat;
+  animation: liquid-sweep 10s ease-in-out infinite;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow: var(--glass-shadow), var(--glass-shadow-tight), var(--glass-inner-glow);
+  transition: transform var(--duration-fast) var(--spring-easing), box-shadow var(--duration-fast) var(--smooth-easing);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.glass-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.glass-card:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+.glass-button {
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg-strong);
+  color: var(--text-0);
+  border-radius: var(--radius-md);
+  padding: 0.9em 1.6em;
+  font-family: var(--font-system);
+  font-size: 1rem;
+  font-weight: 600;
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  box-shadow: var(--glass-shadow), var(--glass-shadow-tight), var(--glass-inner-glow);
+  transition: transform var(--duration-fast) var(--spring-easing), background var(--duration-fast) var(--smooth-easing);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.glass-button:active {
+  /* A soft, deformable squish — wider than tall for an instant — rather than a rigid
+     uniform scale, reading as liquid material giving under a press. */
+  transform: scale(1.04, 0.92);
+  background: var(--glass-bg);
+}
+
+.glass-button.accent {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 85%, white 0%), var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 60%, white 20%);
+}
+
+.glass-button.loading {
+  color: transparent;
+  pointer-events: none;
+  position: relative;
+}
+
+.glass-button.loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 1.1em;
+  height: 1.1em;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: var(--text-0);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+.glass-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  background-color: var(--glass-bg-strong);
+  background-image: linear-gradient(color-mix(in srgb, var(--glass-tint) 16%, transparent), color-mix(in srgb, var(--glass-tint) 16%, transparent));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-pill);
+  padding: 0.4em 0.9em;
+  font-weight: 600;
+  font-size: 0.9rem;
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  /* A lighter, single-shadow version of the panel/card dispersion sliver above — a full
+     masked pseudo-element ring is overkill for a chip this small and there are many of
+     them on screen at once (HUD pills, player strips). */
+  box-shadow: var(--glass-inner-glow), inset 0 -1px 0 color-mix(in srgb, var(--glass-dispersion-warm) 50%, var(--glass-dispersion-cool) 50%);
+}
+
+.color-dot {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 8px currentColor;
+}
+
+.avatar-badge {
+  flex: none;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+
+.glass-input {
+  appearance: none;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text-0);
+  border-radius: var(--radius-md);
+  padding: 0.9em 1.1em;
+  font-family: var(--font-system);
+  font-size: 1.05rem;
+  width: 100%;
+  outline: none;
+  transition: border-color var(--duration-fast) var(--smooth-easing);
+}
+
+.glass-input:focus {
+  border-color: var(--accent);
+}
+
+.screen-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 2em;
+}
+
+.game-card {
+  padding: 1.8em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  min-height: 160px;
+}
+
+.game-card .icon {
+  font-size: 2.4rem;
+}
+
+.game-card.disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.game-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent), var(--glass-shadow);
+}
+
+.vote-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1em;
+  max-width: 900px;
+  width: 100%;
+}
+
+.player-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+}
+
+.room-presence {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.room-presence .player-strip {
+  justify-content: center;
+}
+
+/* Real continuous "squircle" corners where a browser supports the new CSS property —
+   pure progressive enhancement, layered on top of the existing --radius-* scale, which
+   stays the permanent fallback everywhere else (not a stopgap for a future polyfill). */
+@supports (corner-shape: superellipse(2)) {
+  .glass-panel,
+  .glass-card,
+  .glass-button,
+  .glass-pill,
+  .game-card,
+  .achievement-card,
+  .color-swatch,
+  .glass-input {
+    corner-shape: superellipse(2);
+  }
+}

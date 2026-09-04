@@ -1,0 +1,331 @@
+#app {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vw;
+}
+
+.gameover-layout {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3vw;
+  flex-wrap: wrap;
+  max-width: 900px;
+  width: 100%;
+}
+
+.lobby-layout {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6vw;
+  flex-wrap: wrap;
+  max-width: 1200px;
+  width: 100%;
+}
+
+.lobby-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4em;
+  max-width: 480px;
+}
+
+.player-strip-wrap {
+  min-height: 3em;
+}
+
+.lobby-panel {
+  padding: 2.2em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1em;
+  width: 320px;
+}
+
+.qr-canvas {
+  border-radius: var(--radius-md);
+  display: block;
+}
+
+.room-code {
+  font-size: 1.4rem;
+  letter-spacing: 0.2em;
+  padding: 0.5em 1.1em;
+}
+
+.game-select-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.4em;
+  max-width: 1000px;
+  width: 100%;
+}
+
+.party-next-layout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4em;
+  max-width: 560px;
+  width: 100%;
+  text-align: center;
+  padding: 2.6em;
+}
+
+.leader-avatar-host {
+  position: fixed;
+  bottom: 1em;
+  left: 1em;
+  width: 200px;
+  height: 200px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  z-index: 28;
+}
+
+.party-recap-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8em;
+  justify-content: center;
+}
+
+.party-recap-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.8em 1em;
+  min-width: 84px;
+}
+
+.party-recap-item .icon {
+  font-size: 1.6rem;
+}
+
+.finale-layout {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2em;
+  max-width: 640px;
+  width: 100%;
+  text-align: center;
+  padding: 2.6em;
+  overflow: hidden;
+}
+
+.finale-canvas {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.finale-winner-avatar {
+  filter: drop-shadow(0 0 18px currentColor);
+}
+
+.stage-wrap {
+  position: relative;
+  width: min(94vw, 1200px);
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: var(--glass-shadow);
+}
+
+.stage-wrap canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hud-overlay {
+  position: absolute;
+  top: 1em;
+  left: 1em;
+  right: 1em;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6em;
+  pointer-events: none;
+}
+
+.hud-overlay-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  max-width: 42%;
+}
+
+.hud-overlay-group:last-child {
+  justify-content: flex-end;
+}
+
+.hud-overlay .glass-pill {
+  pointer-events: auto;
+  /* Verified real jank source: backdrop-filter forces a recompute against whatever the
+     canvas just repainted, every frame, for every pill — multiplied by player count.
+     Every other .glass-pill use (lobby, waiting room, toasts) sits over static content
+     and keeps the real blur; only the HUD, which lives directly on top of a
+     requestAnimationFrame game loop, needs to drop it for a flat solid fill instead. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background-color: rgba(15, 15, 22, 0.82);
+}
+
+.calibrate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  min-width: 280px;
+}
+
+.calibrate-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+}
+
+.scoreboard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7em;
+  min-width: 320px;
+}
+
+.scoreboard-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.7em 1em;
+}
+
+.scoreboard-row .rank {
+  color: var(--text-2);
+  font-weight: 700;
+  width: 1.4em;
+}
+
+@keyframes float-up-fade {
+  0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
+  15% { transform: translate(-50%, -10vh) scale(1.15); opacity: 1; }
+  100% { transform: translate(-50%, -70vh) scale(1); opacity: 0; }
+}
+
+.reaction-burst {
+  position: fixed;
+  left: var(--spawn-x);
+  bottom: 4vh;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  pointer-events: none;
+  animation: float-up-fade 2.6s ease-out forwards;
+}
+
+.host-volume-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.doodle-canvas-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  touch-action: none;
+}
+
+.doodle-canvas-wrap canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* The WWDC25 keyart's fused-capsule dumbbell, applied to HostControls' QR/wave pair — one
+   glass shell, two lobes, a pinched neck between them via two mask "bites" cut from the
+   top-center and bottom-center edges. Falls back cleanly to a single long pill wherever
+   `mask` isn't honored (overflow:hidden + border-radius:999px still reads fine on its own). */
+.host-controls-cluster {
+  position: relative;
+  display: flex;
+  border-radius: 999px;
+  overflow: hidden;
+  background-color: var(--glass-bg-strong);
+  background-image: linear-gradient(color-mix(in srgb, var(--glass-tint) 16%, transparent), color-mix(in srgb, var(--glass-tint) 16%, transparent));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), var(--glass-shadow-tight), var(--glass-inner-glow);
+  backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+  -webkit-mask:
+    radial-gradient(circle 14px at 50% 0%, transparent 98%, #fff 100%) top / 100% 50% no-repeat,
+    radial-gradient(circle 14px at 50% 100%, transparent 98%, #fff 100%) bottom / 100% 50% no-repeat;
+  mask:
+    radial-gradient(circle 14px at 50% 0%, transparent 98%, #fff 100%) top / 100% 50% no-repeat,
+    radial-gradient(circle 14px at 50% 100%, transparent 98%, #fff 100%) bottom / 100% 50% no-repeat;
+}
+
+.host-cluster-btn {
+  appearance: none;
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-0);
+  font-family: var(--font-system);
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.85em 1.1em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background var(--duration-fast) var(--smooth-easing);
+}
+
+.host-cluster-btn:not(:last-child) {
+  border-right: 1px solid var(--glass-border);
+}
+
+.host-cluster-btn:hover,
+.host-cluster-btn:active {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.wave-ripple-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.wave-ripple-dot {
+  position: absolute;
+  top: -40px;
+  left: var(--wave-x);
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+  border-radius: 50%;
+  background: var(--wave-color);
+  opacity: 0;
+  box-shadow: 0 0 34px 12px var(--wave-color);
+  animation: wave-ripple-fall 0.9s ease-out forwards;
+}
+
+@keyframes wave-ripple-fall {
+  0% { opacity: 0; transform: translateY(0) scale(0.6); }
+  15% { opacity: 0.95; }
+  100% { opacity: 0; transform: translateY(70px) scale(1.9); }
+}
