@@ -4,6 +4,19 @@ import { createAvatarSvg } from "@shared/avatar";
 import { renderQrCode } from "../qrcode";
 import { mountAmbientBackground } from "../game-runtime/ambientMenuBackground";
 
+// LAN URLs are always a bare IPv4 host (e.g. https://192.168.1.4:8443) — a real deploy's
+// URL (Fly/Render/a custom PUBLIC_URL) is always a hostname, never a dotted-quad IP. This
+// is the only signal the Display has for which mode it's in (the client never sees
+// process.env), and it comes for free since opts.lanUrl already carries whichever URL the
+// QR code itself points at.
+function isLanUrl(url: string): boolean {
+  try {
+    return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(new URL(url).hostname);
+  } catch {
+    return true;
+  }
+}
+
 function playerListNodes(players: PlayerInfo[]): (Node | string)[] {
   return players.length
     ? players.map((p) =>
@@ -21,13 +34,16 @@ export function renderLobbyScreen(
 ): void {
   const playerStrip = el("div", { class: "player-strip" }, playerListNodes(opts.players));
   const canvas = el("canvas", { class: "qr-canvas" });
+  const lan = isLanUrl(opts.lanUrl);
 
   const panel = el("div", { class: "glass-panel lobby-panel anim-pop-in" }, [
     el("p", { class: "text-caption" }, ["Scan to join"]),
     canvas,
     el("div", { class: "glass-pill room-code mono" }, [opts.roomCode]),
-    el("p", { class: "text-body" }, ["Same Wi-Fi network as this screen."]),
-    el("p", { class: "text-caption" }, ["Tip: phones can visit /trust once to stop future security warnings."]),
+    el("p", { class: "text-body" }, [lan ? "Same Wi-Fi network as this screen." : "Anyone with this link can join — no Wi-Fi needed."]),
+    // The /trust self-signed-CA flow only exists for the LAN path — a real deploy's cert
+    // is already properly trusted, so there's nothing to fix there.
+    ...(lan ? [el("p", { class: "text-caption" }, ["Tip: phones can visit /trust once to stop future security warnings."])] : []),
   ]);
 
   const continueBtn = el("button", { class: "glass-button accent" }, ["Continue to game select →"]);

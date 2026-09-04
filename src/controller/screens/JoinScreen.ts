@@ -1,5 +1,11 @@
 import { el } from "@shared/dom";
 
+// A LAN host is always a bare IPv4 address (e.g. 192.168.1.4); a real deploy (Fly/Render/a
+// custom domain) is always a real hostname. The /trust flow only exists for the LAN
+// self-signed CA — a real deploy's cert is already properly trusted, so there's nothing
+// there to fix and the link would just be confusing.
+const isLan = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(location.hostname);
+
 export function renderJoinScreen(
   root: HTMLElement,
   opts: { roomCode: string; error?: string; onJoin: (name: string) => void },
@@ -27,9 +33,13 @@ export function renderJoinScreen(
       input,
       joinBtn,
       ...(opts.error ? [el("p", { class: "text-body anim-shake", style: "color:var(--accent-2)" }, [opts.error])] : []),
-      el("a", { href: "/trust", target: "_blank", rel: "noopener", class: "text-caption", style: "text-align:center;text-decoration:underline" }, [
-        "Getting this warning every party? Fix it once →",
-      ]),
+      ...(isLan
+        ? [
+            el("a", { href: "/trust", target: "_blank", rel: "noopener", class: "text-caption", style: "text-align:center;text-decoration:underline" }, [
+              "Getting this warning every party? Fix it once →",
+            ]),
+          ]
+        : []),
     ]),
   );
 
