@@ -18,7 +18,7 @@
     "edge-tts-universal": "^1.4.0",
     "node-forge": "^1.4.0",
     "qrcode": "^1.5.4",
-    "simli-client": "^3.0.2",
+    "simli-client": "3.0.1",
     "sirv": "^3.0.2",
     "tsx": "^4.19.2",
     "ws": "^8.18.0"
