@@ -15,6 +15,7 @@ import { textToSpeech } from "../ai/textToSpeech";
 import { createAvatarSession } from "../ai/simliSession";
 import { getWildcard } from "../ai/generateWildcard";
 import { ensureProfile, getProfile, recordGameResult, getHallOfFame } from "../storage/playerStore";
+import { saveSnapshot, loadSnapshot } from "../rooms/roomSnapshot";
 
 export interface ConnectionState {
   role: "unassigned" | "host" | "controller" | "spectator";
@@ -69,6 +70,7 @@ export function handleMessage(
         return;
       }
       const room = roomManager.createRoom(socket);
+      saveSnapshot(room);
       state.role = "host";
       state.roomCode = room.code;
       sendTo(socket, {
@@ -87,7 +89,30 @@ export function handleMessage(
       }
       const existing = roomManager.getRoom(msg.roomCode);
       if (!existing) {
-        // Room is gone (grace period expired, or the server restarted) — fall back to a fresh room.
+        // Room is gone from memory — either the grace period genuinely expired, or (the
+        // case this now actually recovers from) the whole process restarted. Check disk
+        // before assuming the latter is unrecoverable: a snapshot means the party can
+        // pick back up in the same room code instead of everyone getting bounced to a
+        // brand new one. Rehydrated with an empty player list on purpose — nobody's
+        // reconnected yet; each phone's own player:reconnect fills itself back in below.
+        const snapshot = loadSnapshot(msg.roomCode);
+        if (snapshot) {
+          const room = roomManager.createRoomWithCode(snapshot.code, socket);
+          room.phase = snapshot.phase;
+          room.currentGame = snapshot.currentGame;
+          room.lastScores = snapshot.lastScores;
+          state.role = "host";
+          state.roomCode = room.code;
+          sendTo(socket, {
+            type: "room:resumed",
+            roomCode: room.code,
+            lanUrl: `${serverInfo.lanUrlBase}/play.html?room=${room.code}`,
+            games: GAME_REGISTRY,
+            players: [],
+          });
+          return;
+        }
+        // No snapshot either — genuinely gone, fall back to a fresh room.
         const room = roomManager.createRoom(socket);
         state.role = "host";
         state.roomCode = room.code;
@@ -153,6 +178,7 @@ export function handleMessage(
         deviceId: msg.deviceId,
       });
       ensureProfile(msg.deviceId, name); // touches lastSeen/name even if this device never finishes a game this session
+      saveSnapshot(room);
 
       state.role = "controller";
       state.roomCode = room.code;
@@ -186,10 +212,44 @@ export function handleMessage(
       }
       const room = roomManager.getRoom(msg.roomCode);
       if (!room) {
+        // Genuinely no room to reconnect to yet. If this is a post-restart reconnect race
+        // (this phone got here before the Display's own display:resume rehydrated the
+        // room shell — see that handler), there's nothing to attach to yet either way; the
+        // phone's own ArcadeSocket already retries with backoff, and the next attempt
+        // will find the room once the Display has reconnected.
         sendTo(socket, { type: "player:reconnect_failed", reason: "room_not_found" });
         return;
       }
-      const player = room.players.get(msg.playerId);
+      let player = room.players.get(msg.playerId);
+      // Tracks whether this player had to be rebuilt from a snapshot just now — the
+      // Display's own room.players map may be genuinely empty after a rehydrated
+      // display:resume, so "reconnected" (which only updates an *existing* entry,
+      // client-side) isn't enough to make them show up there; they need the fuller
+      // "joined" broadcast that actually inserts a new one. See below.
+      let rehydratedFromSnapshot = false;
+      if (!player) {
+        // Not yet materialized in this room — e.g. the room was just rehydrated from a
+        // snapshot (server/rooms/roomSnapshot.ts) after a restart and this is the first
+        // time this specific player has been seen since. Check whether they genuinely
+        // belong here before giving up, rather than treating "not found yet" as "never existed."
+        const snapshot = loadSnapshot(room.code);
+        const known = snapshot?.players.find((p) => p.id === msg.playerId && p.sessionToken === msg.sessionToken);
+        if (known) {
+          player = {
+            id: known.id,
+            sessionToken: known.sessionToken,
+            name: known.name,
+            color: known.color,
+            socket,
+            connected: true,
+            joinedAt: Date.now(),
+            leaveTimer: null,
+            deviceId: known.deviceId,
+          };
+          room.players.set(known.id, player);
+          rehydratedFromSnapshot = true;
+        }
+      }
       if (!player || player.sessionToken !== msg.sessionToken) {
         sendTo(socket, { type: "player:reconnect_failed", reason: "session_invalid" });
         return;
@@ -228,9 +288,19 @@ export function handleMessage(
         lastScores: room.phase === "game_over" ? room.lastScores : null,
       });
 
-      sendToHost(room, { type: "room:player_reconnected", playerId: player.id });
-      broadcastToControllers(room, { type: "room:player_reconnected", playerId: player.id }, player.id);
-      broadcastToSpectators(room, { type: "room:player_reconnected", playerId: player.id });
+      if (rehydratedFromSnapshot) {
+        // The Display (and any already-connected controllers/spectators) may have never
+        // seen this player at all this process lifetime — a plain "reconnected" signal
+        // only updates an existing entry client-side, which would silently no-op here.
+        const info = toPlayerInfo(player.id, player);
+        sendToHost(room, { type: "room:player_joined", player: info });
+        broadcastToControllers(room, { type: "room:player_joined", player: info }, player.id);
+        broadcastToSpectators(room, { type: "room:player_joined", player: info });
+      } else {
+        sendToHost(room, { type: "room:player_reconnected", playerId: player.id });
+        broadcastToControllers(room, { type: "room:player_reconnected", playerId: player.id }, player.id);
+        broadcastToSpectators(room, { type: "room:player_reconnected", playerId: player.id });
+      }
       return;
     }
 
@@ -365,6 +435,7 @@ export function handleMessage(
       const target = room.players.get(msg.playerId);
       if (!target) return;
       room.players.delete(msg.playerId);
+      saveSnapshot(room);
       sendTo(target.socket, { type: "player:kicked" });
       target.socket.close();
       sendToHost(room, { type: "room:player_left", playerId: msg.playerId });
@@ -394,6 +465,7 @@ export function handleMessage(
       if (!meta) return;
       room.currentGame = msg.gameId;
       room.phase = meta.requiresMotion ? "calibrating" : "selecting";
+      saveSnapshot(room);
       broadcastRoom(room, { type: "game:selected", gameId: msg.gameId, meta });
       broadcastToSpectators(room, { type: "game:selected", gameId: msg.gameId, meta });
       if (meta.requiresMotion) {
@@ -427,6 +499,7 @@ export function handleMessage(
       }
       room.phase = "in_game";
       room.lastScores = null;
+      saveSnapshot(room);
       broadcastToControllers(room, { type: "game:start", gameId: msg.gameId });
       return;
     }
@@ -436,6 +509,7 @@ export function handleMessage(
       if (!room) return;
       room.phase = "game_over";
       room.lastScores = msg.scores;
+      saveSnapshot(room);
       broadcastRoom(room, { type: "game:over", scores: msg.scores });
       broadcastToSpectators(room, { type: "game:over", scores: msg.scores });
 

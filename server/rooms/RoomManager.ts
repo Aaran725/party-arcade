@@ -2,6 +2,7 @@ import type { WebSocket } from "ws";
 import { Room } from "./Room";
 import type { Player } from "./Player";
 import { generateRoomCode } from "./codes";
+import { deleteSnapshot } from "./roomSnapshot";
 
 const HOST_GRACE_MS = 30_000;
 const PLAYER_GRACE_MS = 30_000;
@@ -12,6 +13,13 @@ export class RoomManager {
   createRoom(hostSocket: WebSocket): Room {
     let code = generateRoomCode();
     while (this.rooms.has(code)) code = generateRoomCode();
+    const room = new Room(code, hostSocket);
+    this.rooms.set(code, room);
+    return room;
+  }
+
+  /** Only ever used to rehydrate a room from a persisted snapshot (server/rooms/roomSnapshot.ts) after a process restart — a real create always calls createRoom() above, which picks its own fresh code. */
+  createRoomWithCode(code: string, hostSocket: WebSocket): Room {
     const room = new Room(code, hostSocket);
     this.rooms.set(code, room);
     return room;
@@ -28,6 +36,11 @@ export class RoomManager {
   markHostDisconnected(room: Room, onExpire: (room: Room) => void): void {
     if (room.hostLeaveTimer) clearTimeout(room.hostLeaveTimer);
     room.hostLeaveTimer = setTimeout(() => {
+      // This is a genuine, deliberate close — the host never came back within the grace
+      // period — not just a restart, which is exactly the case a snapshot needs to
+      // survive. Delete it here so a truly abandoned room doesn't linger and get
+      // rehydrated by a stray reconnect days later.
+      deleteSnapshot(room.code);
       this.deleteRoom(room.code);
       onExpire(room);
     }, HOST_GRACE_MS);

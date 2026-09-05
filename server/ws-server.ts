@@ -6,6 +6,7 @@ import type { ClientToServerMessage } from "@shared/protocol/messages";
 import { RoomManager } from "./rooms/RoomManager";
 import { type ConnectionState, type ServerInfo, handleMessage } from "./protocol/handlers";
 import { broadcastToControllers, broadcastToSpectators, sendToHost } from "./protocol/broadcast";
+import { saveSnapshot } from "./rooms/roomSnapshot";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 // Generous enough for a full-resolution base64 drawing/photo frame with room to spare —
@@ -109,6 +110,7 @@ export function attachWebSocketServer(httpsServer: HTTPServer | HTTPSServer, lan
 
         player.leaveTimer = setTimeout(() => {
           room.players.delete(state.playerId!);
+          saveSnapshot(room);
         }, roomManager.playerGraceMs);
         return;
       }

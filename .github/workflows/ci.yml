@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        # PUBLIC_URL here just tells prebuild's generate-cert.ts to skip self-signed cert
+        # generation (same convention as the Dockerfile's build step) — nothing in CI ever
+        # actually serves traffic, so there's no LAN IP worth generating a cert for.
+        run: PUBLIC_URL=ci npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Chaos test
+        run: npm run chaos-test
