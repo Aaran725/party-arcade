@@ -14,7 +14,7 @@ import { getScenario } from "../ai/generateScenario";
 import { textToSpeech } from "../ai/textToSpeech";
 import { createAvatarSession } from "../ai/simliSession";
 import { getWildcard } from "../ai/generateWildcard";
-import { ensureProfile, getProfile, recordGameResult } from "../storage/playerStore";
+import { ensureProfile, getProfile, recordGameResult, getHallOfFame } from "../storage/playerStore";
 
 export interface ConnectionState {
   role: "unassigned" | "host" | "controller" | "spectator";
@@ -286,6 +286,13 @@ export function handleMessage(
         const scenario = await getScenario();
         sendToHost(room, { type: "game:scenario_result", scenario });
       });
+      return;
+    }
+
+    case "display:request_hall_of_fame": {
+      const room = requireHostRoom(roomManager, state);
+      if (!room) return;
+      sendToHost(room, { type: "game:hall_of_fame_result", entries: getHallOfFame() });
       return;
     }
 

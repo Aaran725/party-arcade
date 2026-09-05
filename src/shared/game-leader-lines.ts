@@ -62,6 +62,11 @@ export function nextGameLine(title: string, description: string): string {
   return `I'm sending you to ${title}. ${description}`;
 }
 
+/** The Autopilot Party Director's own pick, narrated with its actual reason (src/display/party/autopilot.ts) — this is the one line in the whole app where the Leader explains a decision it made itself, not just reacting to one the host made. */
+export function pickAutopilotLine(title: string, reason: string): string {
+  return `Autopilot's calling this one — ${reason}. Next up: ${title}.`;
+}
+
 export function pickFinaleLine(winnerName: string): string {
   const template = FINALE_LINES[Math.floor(Math.random() * FINALE_LINES.length)];
   return template.replace("{winner}", winnerName);

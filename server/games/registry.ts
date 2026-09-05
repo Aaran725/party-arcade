@@ -9,6 +9,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "fast",
   },
   {
     id: "tilt-maze",
@@ -18,6 +19,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 4,
     requiresMotion: true,
     requiresPointer: false,
+    pace: "medium",
   },
   {
     id: "laser-blaster",
@@ -27,6 +29,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 4,
     requiresMotion: true,
     requiresPointer: true,
+    pace: "fast",
   },
   {
     id: "fruit-slice",
@@ -36,6 +39,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 4,
     requiresMotion: true,
     requiresPointer: true,
+    pace: "fast",
   },
   {
     id: "simon-says",
@@ -45,6 +49,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "medium",
   },
   {
     id: "paint-wars",
@@ -54,6 +59,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 4,
     requiresMotion: true,
     requiresPointer: true,
+    pace: "medium",
   },
   {
     id: "trivia-buzzer",
@@ -63,6 +69,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "fast",
   },
   {
     id: "sleeper-agent",
@@ -72,6 +79,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "slow",
   },
   {
     id: "doodle-relay",
@@ -81,6 +89,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "medium",
   },
   {
     id: "draw-off",
@@ -90,6 +99,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "slow",
   },
   {
     id: "scream-royale",
@@ -100,6 +110,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     requiresMotion: false,
     requiresPointer: false,
     requiresMicrophone: true,
+    pace: "fast",
   },
   {
     id: "snap-judgment",
@@ -110,6 +121,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     requiresMotion: false,
     requiresPointer: false,
     requiresCamera: true,
+    pace: "medium",
   },
   {
     id: "echo-chain",
@@ -120,6 +132,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     requiresMotion: false,
     requiresPointer: false,
     requiresMicrophone: true,
+    pace: "fast",
   },
   {
     id: "plot-twist",
@@ -129,6 +142,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "slow",
   },
   {
     id: "push-battle",
@@ -138,6 +152,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "fast",
   },
   {
     id: "ai-wildcard",
@@ -147,6 +162,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: false,
     requiresPointer: false,
+    pace: "medium",
   },
   {
     id: "hot-potato",
@@ -156,6 +172,7 @@ export const GAME_REGISTRY: GameMeta[] = [
     maxPlayers: 8,
     requiresMotion: true,
     requiresPointer: false,
+    pace: "fast",
   },
 ];
 

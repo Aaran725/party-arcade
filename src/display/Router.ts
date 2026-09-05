@@ -7,17 +7,20 @@ import { THEMES } from "./game-runtime/theme";
 import { pickStandingsBlurb } from "@shared/party-commentary";
 import { renderLobbyScreen, updateLobbyPlayers } from "./screens/LobbyScreen";
 import { renderGameSelectScreen, renderCalibrationWaitScreen } from "./screens/GameSelectScreen";
+import { renderHallOfFameScreen } from "./screens/HallOfFameScreen";
 import { renderGameOverScreen } from "./screens/GameOverScreen";
 import { renderPartySetupScreen, type TeamAssignments } from "./screens/PartySetupScreen";
 import { renderPartyNextScreen } from "./screens/PartyNextScreen";
 import { renderPartyFinaleScreen } from "./screens/PartyFinaleScreen";
 import { renderPartyRecapScreen } from "./screens/PartyRecapScreen";
 import { eligibleGames, buildPartyQueue, type PartyHistoryEntry } from "./party/PartySession";
+import { pickNextGameAutopilot, isCloseCall } from "./party/autopilot";
 import { GameStage } from "./game-runtime/GameStage";
 import { HostControls } from "./HostControls";
 import { GameLeaderToggle } from "./host/GameLeaderToggle";
+import { AutopilotToggle } from "./host/AutopilotToggle";
 import type { AIHost } from "./host/AIHost";
-import { pickWelcomeLine, nextGameLine, pickFinaleLine } from "@shared/game-leader-lines";
+import { pickWelcomeLine, nextGameLine, pickFinaleLine, pickAutopilotLine } from "@shared/game-leader-lines";
 import { unlockAudio, setMasterVolume, setMasterMuted } from "@shared/audio";
 import { renderQrCode } from "./qrcode";
 import { ReactionBuzzerDisplay } from "./games/reaction-buzzer/DisplayModule";
@@ -64,6 +67,13 @@ export class DisplayRouter {
   private teamStandings = new Map<string, number>();
 
   private gameLeaderEnabled = false;
+  private autopilotEnabled = false;
+  // "Since the last game ended" energy signals for the Autopilot Party Director
+  // (src/display/party/autopilot.ts) — reset in startGame(), incremented as messages
+  // arrive during the game that's currently playing, read by advanceParty() once that
+  // game ends to decide what comes next.
+  private reactionsSinceLastGame = 0;
+  private achievementsSinceLastGame = 0;
   // Permanently attached (hidden until mounted) rather than re-parented per screen — the
   // Leader needs to keep speaking (and stay visible) through actual gameplay too, when
   // GameStage.mount() replaces the rest of #app's children wholesale.
@@ -120,6 +130,7 @@ export class DisplayRouter {
     );
 
     this.gameLeaderToggle = new GameLeaderToggle((enabled) => this.setGameLeaderEnabled(enabled));
+    new AutopilotToggle((enabled) => (this.autopilotEnabled = enabled));
     this.hostReactions = new HostReactions();
 
     this.hostControls = new HostControls(
@@ -361,6 +372,7 @@ export class DisplayRouter {
 
       case "game:reaction":
         this.hostReactions.spawn(msg.playerId, msg.emoji);
+        this.reactionsSinceLastGame++;
         return;
 
       case "game:ratings_result":
@@ -373,6 +385,11 @@ export class DisplayRouter {
 
       case "game:scenario_result":
         this.stage.onScenarioResult(msg.scenario);
+        return;
+
+      case "game:hall_of_fame_result":
+        transitionOut(this.root);
+        renderHallOfFameScreen(this.root, { entries: msg.entries, onBack: () => this.renderSelect() });
         return;
 
       case "game:wildcard_result":
@@ -391,6 +408,7 @@ export class DisplayRouter {
 
       case "room:achievement_unlocked":
         this.achievementsThisParty.push({ playerId: msg.playerId, achievementIds: msg.achievementIds });
+        this.achievementsSinceLastGame++;
         return;
 
       case "error":
@@ -427,8 +445,13 @@ export class DisplayRouter {
       players: this.playerList(),
       onSelect: (gameId) => this.selectGame(gameId),
       onStartParty: () => this.renderPartySetup(),
+      onShowHallOfFame: () => this.renderHallOfFame(),
     });
     this.syncHostControls();
+  }
+
+  private renderHallOfFame(): void {
+    this.socket.send({ type: "display:request_hall_of_fame" });
   }
 
   private renderPartySetup(): void {
@@ -463,7 +486,24 @@ export class DisplayRouter {
       this.renderPartyRecap();
       return;
     }
-    const nextId = this.partyQueue[this.partyIndex];
+
+    let nextId: GameId;
+    let autopilotReason: string | null = null;
+    if (this.autopilotEnabled) {
+      const remainingPool = this.partyQueue.map((id) => this.games.find((g) => g.id === id)).filter((g): g is GameMeta => !!g);
+      const lastEntry = this.partyHistory[this.partyHistory.length - 1];
+      const picked = pickNextGameAutopilot(remainingPool, {
+        reactionsSinceLastGame: this.reactionsSinceLastGame,
+        achievementsSinceLastGame: this.achievementsSinceLastGame,
+        lastGameWasCloseCall: lastEntry ? isCloseCall(lastEntry.scores) : false,
+        playedThisParty: new Set(this.partyHistory.map((h) => h.gameId)),
+      });
+      nextId = picked.meta.id;
+      autopilotReason = picked.reason;
+    } else {
+      nextId = this.partyQueue[this.partyIndex];
+    }
+
     const meta = this.games.find((g) => g.id === nextId);
     if (!meta) {
       this.advanceParty(); // defensive: shouldn't happen, eligibleGames already filtered the selection
@@ -493,7 +533,7 @@ export class DisplayRouter {
     this.syncHostControls();
 
     if (this.gameLeaderEnabled && this.aiHost) {
-      const intro = nextGameLine(meta.title, meta.description);
+      const intro = autopilotReason ? pickAutopilotLine(meta.title, autopilotReason) : nextGameLine(meta.title, meta.description);
       const line = this.partyIndex === 0 ? `${pickWelcomeLine()} ${intro}` : `${blurb} ${intro}`;
       void this.aiHost.speak(line).then(advance);
     }
@@ -606,6 +646,10 @@ export class DisplayRouter {
     const meta = this.games.find((g) => g.id === gameId)!;
     this.phase = "game";
     this.paused = false;
+    // Fresh energy read for whichever game is about to play — advanceParty() reads these
+    // once it ends to decide the Autopilot Director's next pick.
+    this.reactionsSinceLastGame = 0;
+    this.achievementsSinceLastGame = 0;
     this.socket.send({ type: "game:start", gameId });
     transitionOut(this.root);
     this.stage.mount();

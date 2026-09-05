@@ -83,3 +83,20 @@ export function recordGameResult(deviceId: string, gameId: GameId, rank: number)
   persist();
   return newlyUnlocked;
 }
+
+export interface HallOfFameEntry {
+  name: string;
+  wins: number;
+  gamesPlayed: number;
+  achievementCount: number;
+}
+
+/** A pure read over the existing store — every device that's ever played already has a profile here, this just ranks them. No new tracking, just the first time anyone's been able to see anyone else's. */
+export function getHallOfFame(limit = 20): HallOfFameEntry[] {
+  const store = load();
+  return Object.values(store)
+    .filter((p) => p.gamesPlayed > 0) // a device that joined but never finished a game has nothing to rank
+    .map((p) => ({ name: p.name, wins: p.wins, gamesPlayed: p.gamesPlayed, achievementCount: p.achievements.length }))
+    .sort((a, b) => b.wins - a.wins || b.achievementCount - a.achievementCount)
+    .slice(0, limit);
+}

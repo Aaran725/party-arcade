@@ -36,4 +36,6 @@ export interface GameMeta {
   requiresPointer: boolean;
   requiresMicrophone?: boolean;
   requiresCamera?: boolean;
+  /** The one real signal the Autopilot Party Director (src/display/party/autopilot.ts) uses to keep a party's energy up or deliberately change pace — not a UI label, just a tag on the underlying rhythm of the game (buzzer/reaction games are fast, deduction/drawing games are slow). */
+  pace: "fast" | "medium" | "slow";
 }

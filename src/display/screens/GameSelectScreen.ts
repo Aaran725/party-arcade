@@ -26,7 +26,13 @@ export const ICONS: Record<string, string> = {
 
 export function renderGameSelectScreen(
   root: HTMLElement,
-  opts: { games: GameMeta[]; players: PlayerInfo[]; onSelect: (gameId: GameMeta["id"]) => void; onStartParty: () => void },
+  opts: {
+    games: GameMeta[];
+    players: PlayerInfo[];
+    onSelect: (gameId: GameMeta["id"]) => void;
+    onStartParty: () => void;
+    onShowHallOfFame: () => void;
+  },
 ): void {
   const playerCount = opts.players.length;
   // Assigned after root.replaceChildren() below (mountAmbientBackground prepends into root,
@@ -54,6 +60,9 @@ export function renderGameSelectScreen(
   partyBtn.disabled = playerCount === 0;
   partyBtn.addEventListener("click", opts.onStartParty);
 
+  const hallOfFameBtn = el("button", { class: "glass-button" }, ["🏆 Hall of Fame"]);
+  hallOfFameBtn.addEventListener("click", opts.onShowHallOfFame);
+
   root.replaceChildren(
     // width:100% — an unstyled wrapper shrink-to-fits inside #app's centered flex; with
     // few/sparse cards that can collapse the grid below its own minmax() track minimum.
@@ -61,7 +70,7 @@ export function renderGameSelectScreen(
       el("div", { class: "screen-header" }, [
         el("h2", { class: "title-lg" }, ["Play"]),
         el("p", { class: "text-body" }, [`${playerCount} player${playerCount === 1 ? "" : "s"} connected`]),
-        partyBtn,
+        el("div", { style: "display:flex;gap:0.6em" }, [partyBtn, hallOfFameBtn]),
       ]),
       el("p", { class: "text-caption" }, ["Quick play — jump into one game"]),
       el("div", { class: "game-select-grid" }, cards),

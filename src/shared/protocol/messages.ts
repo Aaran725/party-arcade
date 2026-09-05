@@ -54,6 +54,10 @@ export interface DisplayRequestTranscriptionMsg {
 export interface DisplayRequestScenarioMsg {
   type: "display:request_scenario";
 }
+/** The Hall of Fame is display-only (a TV-visible shared scoreboard, not a per-phone Career-style query) — same request/result shape as the other display-request-then-game-result pairs. */
+export interface DisplayRequestHallOfFameMsg {
+  type: "display:request_hall_of_fame";
+}
 export interface DisplayRequestHostSpeechMsg {
   type: "display:request_host_speech";
   text: string;
@@ -355,6 +359,16 @@ export interface GameScenarioResultMsg {
   type: "game:scenario_result";
   scenario: string;
 }
+export interface HallOfFameEntrySnapshot {
+  name: string;
+  wins: number;
+  gamesPlayed: number;
+  achievementCount: number;
+}
+export interface GameHallOfFameResultMsg {
+  type: "game:hall_of_fame_result";
+  entries: HallOfFameEntrySnapshot[];
+}
 export interface GameHostSpeechResultMsg {
   type: "game:host_speech_result";
   audioData: string | null; // data:audio/mpeg;base64,... — null if TTS failed, caller just skips speaking
@@ -420,6 +434,7 @@ export type ClientToServerMessage =
   | DisplayRequestRatingMsg
   | DisplayRequestTranscriptionMsg
   | DisplayRequestScenarioMsg
+  | DisplayRequestHallOfFameMsg
   | DisplayRequestHostSpeechMsg
   | DisplayRequestAvatarSessionMsg
   | DisplayRequestWildcardMsg
@@ -479,6 +494,7 @@ export type ServerToClientMessage =
   | GameRatingsResultMsg
   | GameTranscriptionResultMsg
   | GameScenarioResultMsg
+  | GameHallOfFameResultMsg
   | GameHostSpeechResultMsg
   | GameAvatarSessionResultMsg
   | GameWildcardResultMsg
