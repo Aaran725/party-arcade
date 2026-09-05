@@ -1,3 +1,4 @@
+import { uiScale } from "../../../game-runtime/canvas";
 import type { DisplayMechanicHandler } from "./types";
 import { rankByDistance } from "./shared";
 
@@ -25,12 +26,12 @@ export function createAimMechanic(): DisplayMechanicHandler {
       return rankByDistance(withDistance, (distance) => Math.round(180 - distance));
     },
     onPlayerLeave: (playerId) => locked.delete(playerId),
-    drawExtra: (ctx, cx, cy, w, h, round, accent) => drawCompassRose(ctx, cx, cy, Math.min(w, h) * 0.1, round.secret ?? 0, accent),
+    drawExtra: (ctx, cx, cy, w, h, round, accent) => drawCompassRose(ctx, cx, cy, Math.min(w, h) * 0.1, round.secret ?? 0, accent, uiScale(w, h)),
   };
 }
 
 /** A simple compass rose marking the hidden target heading — not the players' live headings (those only exist on their own phones), just enough for the room to see roughly where "the target" is relative to N. */
-function drawCompassRose(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number, targetHeading: number, accent: string): void {
+function drawCompassRose(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number, targetHeading: number, accent: string, scale: number): void {
   ctx.save();
   ctx.strokeStyle = "rgba(255,255,255,0.35)";
   ctx.lineWidth = 2;
@@ -39,7 +40,7 @@ function drawCompassRose(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.stroke();
 
   ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.font = "600 12px -apple-system, sans-serif";
+  ctx.font = `600 ${Math.round(12 * scale)}px -apple-system, sans-serif`;
   ctx.fillText("N", cx, cy - radius - 12);
 
   const rad = (targetHeading * Math.PI) / 180;

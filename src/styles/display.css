@@ -135,7 +135,10 @@
 
 .stage-wrap {
   position: relative;
-  width: min(94vw, 1200px);
+  /* Bounded by both viewport dimensions (not a flat px ceiling) so the stage keeps
+     growing on a real large-format TV instead of topping out at a size tuned for a
+     laptop window. */
+  width: min(96vw, 96vh * 16 / 9);
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-xl);
   overflow: hidden;

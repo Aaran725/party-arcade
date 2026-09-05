@@ -1,7 +1,7 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -26,28 +26,6 @@ interface RankedResult {
   peak: number;
   rank: number;
   points: number;
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }
 
 function rankResults(peaks: { playerId: string; peak: number }[]): RankedResult[] {
@@ -219,25 +197,25 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🎤 Scream Royale", w / 2, h * 0.22);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.4 + i * 46, w * 0.75, 26));
       return;
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "600 16px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`Round ${Math.min(this.roundIndex + 1, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
     const prompt = PROMPTS[Math.min(this.roundIndex, PROMPTS.length - 1)];
 
     if (this.phase === "ready") {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.font = "700 28px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(28 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, prompt, w / 2, h * 0.42, w * 0.7, 34);
-      ctx.font = "600 20px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.65)";
       ctx.fillText("Get ready…", w / 2, h * 0.58);
       return;
@@ -245,7 +223,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
 
     if (this.phase === "active") {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "700 24px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, prompt, w / 2, h * 0.14, w * 0.7, 30);
       this.drawBars(ctx, w, h);
       return;
@@ -253,17 +231,17 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
 
     // result
     ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.font = "700 24px -apple-system, sans-serif";
+    ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText("Round results", w / 2, h * 0.12);
     const rowH = Math.min(70, (h * 0.7) / Math.max(1, this.lastRoundResults.length));
     this.lastRoundResults.forEach((r, i) => {
       const y = h * 0.2 + i * rowH;
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "600 18px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`#${r.rank}  ${this.nameFor(r.playerId)}`, w * 0.15, y);
       ctx.textAlign = "right";
-      ctx.font = "700 18px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = THEME.accent;
       ctx.fillText(`peak ${r.peak}  +${r.points}`, w * 0.85, y);
     });
@@ -274,7 +252,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
   private drawBars(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const players = this.connectedPlayers();
     if (players.length === 0) return;
-    const pad = 24;
+    const pad = Math.min(w, h) * (24 / 675);
     const areaTop = h * 0.28;
     const areaBottom = h * 0.92;
     // Proportional cap (was a flat 90px, frozen regardless of screen size) — still keeps
@@ -303,7 +281,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
       }
 
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "600 14px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(14 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(p.name, x + barW / 2, areaBottom + 22);
     });
   }

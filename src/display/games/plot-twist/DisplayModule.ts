@@ -1,7 +1,7 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
-import { createStageCanvas } from "../../game-runtime/canvas";
+import { createStageCanvas, uiScale, wrapText, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -35,28 +35,6 @@ interface RankedResult {
   votes: number;
   rank: number;
   points: number;
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }
 
 function rankResults(counts: { playerId: string; votes: number }[]): RankedResult[] {
@@ -248,37 +226,39 @@ export class PlotTwistDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🌀 Plot Twist", w / 2, h * 0.22);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.4 + i * 46, w * 0.78, 26));
       return;
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "600 16px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`Round ${Math.min(this.roundIndex + 1, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
     if (this.phase === "waiting_scenario") {
+      this.drawGlassPanel(ctx, w * 0.2, h * 0.36, w * 0.6, h * 0.18);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "700 24px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       const dots = ".".repeat((Math.floor(now / 400) % 3) + 1);
       ctx.fillText(`🌀 Thinking of something absurd${dots}`, w / 2, h * 0.45);
       return;
     }
 
     if (this.phase === "respond") {
+      this.drawGlassPanel(ctx, w * 0.08, h * 0.08, w * 0.84, h * 0.3);
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.font = "700 24px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, this.scenario, w / 2, h * 0.18, w * 0.75, 32);
       const remaining = Math.max(0, this.phaseDeadline - now);
-      ctx.font = "600 16px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.32);
 
       const players = this.connectedPlayers();
-      ctx.font = "600 15px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
       players.forEach((p, i) => {
         const y = h * 0.46 + i * 30;
         const ready = this.responses.has(p.id);
@@ -289,28 +269,30 @@ export class PlotTwistDisplay implements DisplayGameModule {
     }
 
     if (this.phase === "voting") {
+      this.drawGlassPanel(ctx, w * 0.08, h * 0.06, w * 0.84, h * 0.84);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "600 18px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, this.scenario, w / 2, h * 0.1, w * 0.75, 24);
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "700 20px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("Vote on your phone", w / 2, h * 0.22);
 
       const roster = [...this.responses.values()];
       const rowH = Math.min(64, (h * 0.6) / Math.max(1, roster.length));
       const top = h * 0.3;
-      ctx.font = "600 17px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(17 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       roster.forEach((text, i) => wrapText(ctx, `"${text}"`, w / 2, top + i * rowH, w * 0.7, 22));
       return;
     }
 
     // result
+    this.drawGlassPanel(ctx, w * 0.08, h * 0.06, w * 0.84, h * 0.88);
     ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.font = "700 24px -apple-system, sans-serif";
+    ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText("Round results", w / 2, h * 0.1);
     if (this.lastRoundResults.length === 0) {
-      ctx.font = "500 18px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText("Nobody submitted a response in time.", w / 2, h * 0.4);
     } else {
@@ -319,14 +301,14 @@ export class PlotTwistDisplay implements DisplayGameModule {
         const y = h * 0.18 + i * rowH;
         ctx.textAlign = "left";
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.font = "700 18px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(`#${r.rank}  ${this.nameFor(r.playerId)}`, w * 0.08, y);
-        ctx.font = "500 15px -apple-system, sans-serif";
+        ctx.font = `500 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillStyle = "rgba(255,255,255,0.75)";
         wrapText(ctx, `"${this.responses.get(r.playerId) ?? ""}"`, w * 0.08 + 140, y + 4, w * 0.55, 20);
 
         ctx.textAlign = "right";
-        ctx.font = "700 18px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillStyle = THEME.accent;
         ctx.fillText(`${r.votes} vote${r.votes === 1 ? "" : "s"} · +${r.points}`, w * 0.94, y);
         ctx.textAlign = "left";
@@ -334,6 +316,15 @@ export class PlotTwistDisplay implements DisplayGameModule {
     }
     ctx.textAlign = "center";
     drawParticles(ctx, this.particles, now);
+  }
+
+  /** A themed glass card behind this phase's content — matches the roundRect+drawSpecularEdge chrome the rest of the roster already uses, previously missing here since Plot Twist drew straight onto the ambient background. */
+  private drawGlassPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const r = Math.min(w, h) * 0.08;
+    ctx.fillStyle = "rgba(20,16,32,0.45)";
+    roundRect(ctx, x, y, w, h, r);
+    ctx.fill();
+    drawSpecularEdge(ctx, x, y, w, h, r, 0.22);
   }
 
   destroy(): void {

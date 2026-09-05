@@ -1,7 +1,7 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -24,28 +24,6 @@ interface RankedResult {
   votes: number;
   rank: number;
   points: number;
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }
 
 function gridLayout(n: number): { cols: number; rows: number } {
@@ -246,30 +224,30 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("📸 Snap Judgment", w / 2, h * 0.22);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.4 + i * 46, w * 0.78, 26));
       return;
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "600 16px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`Round ${Math.min(this.roundIndex + 1, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
     if (this.phase === "capture") {
       const prompt = PROMPTS[Math.min(this.roundIndex, PROMPTS.length - 1)];
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.font = "700 26px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, prompt, w / 2, h * 0.16, w * 0.7, 32);
       const remaining = Math.max(0, this.phaseDeadline - now);
-      ctx.font = "600 18px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.65)";
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.28);
 
       const players = this.connectedPlayers();
-      ctx.font = "600 15px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
       players.forEach((p, i) => {
         const y = h * 0.4 + i * 30;
         const ready = this.photos.has(p.id);
@@ -282,7 +260,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
 
     if (this.phase === "voting") {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "700 22px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(22 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("Vote on your phone", w / 2, h * 0.1);
       this.drawPhotoGrid(ctx, w, h);
       return;
@@ -290,10 +268,10 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
 
     // result
     ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.font = "700 24px -apple-system, sans-serif";
+    ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText("Round results", w / 2, h * 0.1);
     if (this.lastRoundResults.length === 0) {
-      ctx.font = "500 18px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText("Nobody captured a photo in time.", w / 2, h * 0.4);
     } else {
@@ -318,9 +296,9 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
         }
         ctx.textAlign = "left";
         ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.font = "700 18px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(`#${r.rank}  ${this.nameFor(r.playerId)}`, w * 0.15 + thumbW + 18, y + thumbH * 0.4);
-        ctx.font = "600 15px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillStyle = THEME.accent;
         ctx.fillText(`${r.votes} vote${r.votes === 1 ? "" : "s"} · +${r.points}`, w * 0.15 + thumbW + 18, y + thumbH * 0.65);
       });
@@ -333,7 +311,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     const ids = [...this.photos.keys()];
     if (ids.length === 0) return;
     const { cols, rows } = gridLayout(ids.length);
-    const pad = 16;
+    const pad = Math.min(w, h) * (16 / 675);
     const top = h * 0.16;
     const cellW = (w - pad * (cols + 1)) / cols;
     const cellH = (h - top - pad * (rows + 1)) / rows;
@@ -369,7 +347,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
       drawSpecularEdge(ctx, x, y, cellW, cellH, cellRadius, 0.22);
 
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "600 13px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(13 * uiScale(w, h))}px -apple-system, sans-serif`;
       const votes = voteCounts.get(id) ?? 0;
       ctx.fillText(`${p?.name ?? "?"}${votes > 0 ? ` · ${votes}` : ""}`, x + cellW / 2, y + cellH - 8);
     });

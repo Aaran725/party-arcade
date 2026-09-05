@@ -1,6 +1,6 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
-import { createStageCanvas } from "../../game-runtime/canvas";
+import { createStageCanvas, drawSpecularEdge, roundRect, uiScale } from "../../game-runtime/canvas";
 import { drawReticle } from "../../game-runtime/reticle";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { spawnConfetti, spawnBurst, stepParticles, drawParticles, type Particle } from "../../game-runtime/particles";
@@ -176,6 +176,21 @@ export class PaintWarsDisplay implements DisplayGameModule {
     this.draw(now);
   }
 
+  /** Small glass-chrome pill behind a centered HUD text label (e.g. the round timer), matching the shared badge look used elsewhere for floating overlay text. `ctx.font`/`textAlign` must already be set for the label; draw the label itself right after this call. */
+  private drawHudBadge(ctx: CanvasRenderingContext2D, cx: number, y: number, text: string, fontSizePx: number): void {
+    const textW = ctx.measureText(text).width;
+    const padX = fontSizePx * 0.55;
+    const padY = fontSizePx * 0.35;
+    const badgeW = textW + padX * 2;
+    const badgeH = fontSizePx * 0.97 + padY * 2;
+    const badgeX = cx - badgeW / 2;
+    const badgeY = y - fontSizePx * 0.75 - padY;
+    ctx.fillStyle = "rgba(20,16,32,0.45)";
+    roundRect(ctx, badgeX, badgeY, badgeW, badgeH, Math.min(badgeW, badgeH) * 0.25);
+    ctx.fill();
+    drawSpecularEdge(ctx, badgeX, badgeY, badgeW, badgeH, Math.min(badgeW, badgeH) * 0.25, 0.22);
+  }
+
   private draw(now: number): void {
     const ctx = this.stage!.ctx;
     const canvas = this.stage!.canvas;
@@ -229,10 +244,13 @@ export class PaintWarsDisplay implements DisplayGameModule {
     }
 
     const remaining = Math.max(0, GAME_DURATION_MS - (now - this.startedAt));
-    ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.font = "600 20px -apple-system, sans-serif";
+    const timerLabel = `${Math.ceil(remaining / 1000)}s`;
+    const timerFontSize = Math.round(20 * uiScale(w, h));
+    ctx.font = `600 ${timerFontSize}px -apple-system, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, 32);
+    this.drawHudBadge(ctx, w / 2, 32, timerLabel, timerFontSize);
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.fillText(timerLabel, w / 2, 32);
   }
 
   destroy(): void {

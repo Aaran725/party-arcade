@@ -31,6 +31,41 @@ export function createStageCanvas(root: HTMLElement): { canvas: HTMLCanvasElemen
   };
 }
 
+/**
+ * A uniform text/UI scale factor derived from the stage's own size, for games whose canvas
+ * font sizes are otherwise tuned as fixed px literals. Exactly 1.0 (zero visual change) at
+ * or below 675px in the shorter dimension — the stage's old fixed reference size before
+ * display.css's `.stage-wrap` was allowed to grow past it — so nothing already tuned for a
+ * normal window regresses; scales up proportionally only once the stage genuinely grows
+ * larger than that, and is capped at 2.2x so an 8K screen doesn't get runaway oversized text.
+ */
+export function uiScale(w: number, h: number): number {
+  return Math.min(2.2, Math.max(1, Math.min(w, h) / 675));
+}
+
+/** Wraps `text` into lines no wider than `maxWidth`, centered vertically around `cy`. Shared across every game that needs multi-line canvas text instead of each defining its own copy. */
+export function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  const totalHeight = lines.length * lineHeight;
+  const startY = cy - totalHeight / 2 + lineHeight / 2;
+  const prevBaseline = ctx.textBaseline;
+  ctx.textBaseline = "middle";
+  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
+  ctx.textBaseline = prevBaseline;
+}
+
 export function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,

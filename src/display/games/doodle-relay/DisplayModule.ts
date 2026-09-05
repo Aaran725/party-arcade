@@ -2,7 +2,7 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries } from "@shared/word-bank";
-import { createStageCanvas } from "../../game-runtime/canvas";
+import { createStageCanvas, drawSpecularEdge, roundRect, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { type Popup, drawPopups, spawnPopup, stepPopups } from "../../game-runtime/popupText";
@@ -38,28 +38,6 @@ function speedBonus(remainingMs: number, totalMs: number): number {
   if (remainingMs > totalMs * 0.6) return 3;
   if (remainingMs > totalMs * 0.3) return 2;
   return 1;
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }
 
 export class DoodleRelayDisplay implements DisplayGameModule {
@@ -354,6 +332,21 @@ export class DoodleRelayDisplay implements DisplayGameModule {
     this.draw(now);
   }
 
+  /** Small glass-chrome pill behind a centered HUD text label (round counter, status line, timer), matching the shared badge look used elsewhere for floating overlay text. `ctx.font`/`textAlign` must already be set for the label; draw the label itself right after this call. */
+  private drawHudBadge(ctx: CanvasRenderingContext2D, cx: number, y: number, text: string, fontSizePx: number): void {
+    const textW = ctx.measureText(text).width;
+    const padX = fontSizePx * 0.55;
+    const padY = fontSizePx * 0.35;
+    const badgeW = textW + padX * 2;
+    const badgeH = fontSizePx * 0.97 + padY * 2;
+    const badgeX = cx - badgeW / 2;
+    const badgeY = y - fontSizePx * 0.75 - padY;
+    ctx.fillStyle = "rgba(20,16,32,0.45)";
+    roundRect(ctx, badgeX, badgeY, badgeW, badgeH, Math.min(badgeW, badgeH) * 0.25);
+    ctx.fill();
+    drawSpecularEdge(ctx, badgeX, badgeY, badgeW, badgeH, Math.min(badgeW, badgeH) * 0.25, 0.22);
+  }
+
   private draw(now: number): void {
     const ctx = this.stage!.ctx;
     const canvas = this.stage!.canvas;
@@ -367,9 +360,9 @@ export class DoodleRelayDisplay implements DisplayGameModule {
     if (now < this.rulesUntil) {
       ctx.textAlign = "center";
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("✏️ Doodle Relay", w / 2, h * 0.25);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => {
         wrapText(ctx, line, w / 2, h * 0.42 + i * 46, w * 0.75, 26);
@@ -379,22 +372,31 @@ export class DoodleRelayDisplay implements DisplayGameModule {
 
     ctx.drawImage(this.doodleCanvas, 0, 0, DOODLE_W, DOODLE_H, 0, 0, w, h);
 
-    ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "600 16px -apple-system, sans-serif";
+    const roundLabel = `Round ${Math.min(this.roundIndex, this.roundTotal)} / ${this.roundTotal}`;
+    const roundFontSize = Math.round(16 * uiScale(w, h));
+    ctx.font = `600 ${roundFontSize}px -apple-system, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillText(`Round ${Math.min(this.roundIndex, this.roundTotal)} / ${this.roundTotal}`, w / 2, 28);
+    this.drawHudBadge(ctx, w / 2, 28, roundLabel, roundFontSize);
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.fillText(roundLabel, w / 2, 28);
 
     if (this.roundActive) {
       const artistName = this.nameFor(this.currentArtistId);
+      const statusLabel = this.awaitingArbitration ? `${this.nameFor(this.buzzedPlayerId ?? "")} is guessing…` : `${artistName} is drawing…`;
+      const statusFontSize = Math.round(20 * uiScale(w, h));
+      ctx.font = `600 ${statusFontSize}px -apple-system, sans-serif`;
+      this.drawHudBadge(ctx, w / 2, h - 30, statusLabel, statusFontSize);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "600 20px -apple-system, sans-serif";
-      ctx.fillText(this.awaitingArbitration ? `${this.nameFor(this.buzzedPlayerId ?? "")} is guessing…` : `${artistName} is drawing…`, w / 2, h - 30);
+      ctx.fillText(statusLabel, w / 2, h - 30);
 
       if (!this.awaitingArbitration) {
         const remaining = Math.max(0, this.roundDeadline - now);
+        const timerLabel = `${Math.ceil(remaining / 1000)}s`;
+        const timerFontSize = Math.round(18 * uiScale(w, h));
+        ctx.font = `600 ${timerFontSize}px -apple-system, sans-serif`;
+        this.drawHudBadge(ctx, w / 2, 54, timerLabel, timerFontSize);
         ctx.fillStyle = "rgba(255,255,255,0.75)";
-        ctx.font = "600 18px -apple-system, sans-serif";
-        ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, 54);
+        ctx.fillText(timerLabel, w / 2, 54);
       }
     }
 

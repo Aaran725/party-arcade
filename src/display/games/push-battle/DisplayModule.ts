@@ -1,7 +1,7 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -306,27 +306,27 @@ export class PushBattleDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🤜 Push Battle", w / 2, h * 0.22);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      RULES_LINES.forEach((line, i) => this.wrapText(ctx, line, w / 2, h * 0.4 + i * 46, w * 0.78, 26));
+      RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.4 + i * 46, w * 0.78, 26));
       return;
     }
 
     if (this.phase === "tournament_result") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 26px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(this.championId ? `🏆 ${this.nameFor(this.championId)} wins it all!` : "Tournament over", w / 2, h * 0.14);
       const rowH = Math.min(70, (h * 0.7) / Math.max(1, this.lastRankedResults.length));
       this.lastRankedResults.forEach((r, i) => {
         const y = h * 0.28 + i * rowH;
         ctx.textAlign = "left";
         ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.font = "600 18px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(`#${r.rank}  ${this.nameFor(r.playerId)}`, w * 0.15, y);
         ctx.textAlign = "right";
-        ctx.font = "700 18px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillStyle = THEME.accent;
         ctx.fillText(`+${r.points}`, w * 0.85, y);
       });
@@ -341,7 +341,7 @@ export class PushBattleDisplay implements DisplayGameModule {
       const pa = this.connectedPlayers().find((p) => p.id === a);
       const pb = this.connectedPlayers().find((p) => p.id === b);
 
-      ctx.font = "700 22px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(22 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = pa?.color ?? "#fff";
       ctx.textAlign = "left";
       ctx.fillText(pa?.name ?? "?", w * 0.08, h * 0.14);
@@ -352,7 +352,7 @@ export class PushBattleDisplay implements DisplayGameModule {
 
       if (this.phase === "matchup_intro") {
         ctx.fillStyle = "rgba(255,255,255,0.7)";
-        ctx.font = "600 20px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("Get ready…", w / 2, h * 0.4);
       }
 
@@ -391,34 +391,12 @@ export class PushBattleDisplay implements DisplayGameModule {
       if (this.phase === "round_result") {
         const winnerId = this.meter <= 0 ? a : b;
         ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.font = "700 24px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(`${this.nameFor(winnerId)} wins the match!`, w / 2, h * 0.65);
       }
     }
 
     drawParticles(ctx, this.particles, now);
-  }
-
-  private wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-    const words = text.split(" ");
-    const lines: string[] = [];
-    let line = "";
-    for (const word of words) {
-      const test = line ? `${line} ${word}` : word;
-      if (ctx.measureText(test).width > maxWidth && line) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = test;
-      }
-    }
-    if (line) lines.push(line);
-    const totalHeight = lines.length * lineHeight;
-    const startY = cy - totalHeight / 2 + lineHeight / 2;
-    const prevBaseline = ctx.textBaseline;
-    ctx.textBaseline = "middle";
-    lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-    ctx.textBaseline = prevBaseline;
   }
 
   destroy(): void {

@@ -1,3 +1,5 @@
+import { uiScale } from "./canvas";
+
 export interface Popup {
   x: number;
   y: number;
@@ -16,8 +18,10 @@ export function stepPopups(popups: Popup[], now: number): Popup[] {
 }
 
 export function drawPopups(ctx: CanvasRenderingContext2D, popups: Popup[], now: number): void {
+  const dpr = window.devicePixelRatio || 1;
+  const scale = uiScale(ctx.canvas.width / dpr, ctx.canvas.height / dpr);
   ctx.textAlign = "center";
-  ctx.font = "700 20px -apple-system, sans-serif";
+  ctx.font = `700 ${Math.round(20 * scale)}px -apple-system, sans-serif`;
   for (const p of popups) {
     const t = (now - p.bornAt) / p.life;
     ctx.globalAlpha = Math.max(0, 1 - t);

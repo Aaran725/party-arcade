@@ -2,7 +2,7 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries, type WordEntry } from "@shared/word-bank";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { type ShakeState, createShakeState, triggerShake, withShake } from "../../game-runtime/shake";
@@ -38,28 +38,6 @@ function shuffle<T>(arr: T[]): T[] {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }
 
 export class SleeperAgentDisplay implements DisplayGameModule {
@@ -322,9 +300,9 @@ export class SleeperAgentDisplay implements DisplayGameModule {
 
       if (this.phase === "rules") {
         ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.font = "700 30px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("🕵️ Sleeper Agent", w / 2, h * 0.2);
-        ctx.font = "500 19px -apple-system, sans-serif";
+        ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillStyle = "rgba(255,255,255,0.85)";
         RULES_LINES.forEach((line, i) => {
           wrapText(ctx, line, w / 2, h * 0.35 + i * 46, w * 0.75, 26);
@@ -335,30 +313,30 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       }
 
       ctx.fillStyle = "rgba(255,255,255,0.6)";
-      ctx.font = "600 16px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`Round ${Math.min(this.roundIndex, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
       if (this.phase === "discussion") {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.font = "600 26px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         wrapText(ctx, `Category: ${this.entry?.category ?? ""}`, w / 2, h * 0.4, w * 0.8, 34);
-        ctx.font = "500 18px -apple-system, sans-serif";
+        ctx.font = `500 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillStyle = "rgba(255,255,255,0.7)";
         wrapText(ctx, "Discuss out loud — figure out who's the Agent.", w / 2, h * 0.5, w * 0.7, 26);
         this.drawCountdown(ctx, w, h, now);
       } else if (this.phase === "voting") {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.font = "600 26px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("Vote on your phone", w / 2, h * 0.35);
         this.drawCountdown(ctx, w, h, now);
         this.drawVoteTally(ctx, w, h);
       } else if (this.phase === "resolution") {
         ctx.fillStyle = this.agentCaught || this.redemptionResult ? "#30D158" : "#FF453A";
-        ctx.font = "700 36px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(36 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(this.resultFlash ?? "", w / 2, h * 0.45);
       } else if (this.phase === "redemption") {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.font = "600 24px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("Agent is choosing a final guess…", w / 2, h * 0.45);
       }
 
@@ -370,7 +348,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
   private drawCountdown(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
     const remaining = Math.max(0, this.phaseDeadline - now);
     ctx.fillStyle = "rgba(255,255,255,0.75)";
-    ctx.font = "600 20px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.9);
   }
 
@@ -393,7 +371,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       const cy = y + row * rowH;
       const count = counts.get(p.id) ?? 0;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "600 15px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(p.name, x, cy - 22);
       ctx.fillStyle = p.color;
       roundRect(ctx, x - cellW / 2 + 10, cy - 8, cellW - 20, 16, 8);
@@ -403,7 +381,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       ctx.globalAlpha = 1;
       if (count > 0) {
         ctx.fillStyle = "#fff";
-        ctx.font = "700 13px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(13 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(String(count), x, cy);
       }
     });

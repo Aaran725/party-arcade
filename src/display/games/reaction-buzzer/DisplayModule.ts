@@ -1,6 +1,6 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { type ShakeState, createShakeState, triggerShake, withShake } from "../../game-runtime/shake";
@@ -240,7 +240,7 @@ export class ReactionBuzzerDisplay implements DisplayGameModule {
       drawPopups(ctx, this.popups, now);
 
       ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.font = "600 20px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText(`Round ${Math.min(this.roundIndex, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, originY - 24 < 24 ? 24 : originY - 24);
     });

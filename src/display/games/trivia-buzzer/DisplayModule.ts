@@ -1,7 +1,7 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import { drawTriviaQuestions, type TriviaQuestion } from "@shared/trivia-bank";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { type ShakeState, createShakeState, triggerShake, withShake } from "../../game-runtime/shake";
@@ -188,14 +188,14 @@ export class TriviaBuzzerDisplay implements DisplayGameModule {
       const q = this.currentQuestion();
       if (q) {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.font = "600 26px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.textAlign = "center";
         wrapText(ctx, q.question, w / 2, h * 0.22, w * 0.8, 34);
 
         const cols = 2;
         const rows = 2;
         const pad = w * 0.12;
-        const gap = 24;
+        const gap = Math.min(w, h) * (24 / 675);
         const gridW = w - pad * 2;
         const gridH = h * 0.42;
         const cellW = (gridW - gap) / cols;
@@ -215,7 +215,7 @@ export class TriviaBuzzerDisplay implements DisplayGameModule {
           drawSpecularEdge(ctx, x, y, cellW, cellH, 18, 0.28);
           ctx.globalAlpha = 1;
           ctx.fillStyle = "rgba(0,0,0,0.85)";
-          ctx.font = "600 18px -apple-system, sans-serif";
+          ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
           wrapText(ctx, choice, x + cellW / 2, y + cellH / 2, cellW * 0.85, 22);
         });
       }
@@ -238,7 +238,7 @@ export class TriviaBuzzerDisplay implements DisplayGameModule {
       drawPopups(ctx, this.popups, now);
 
       ctx.fillStyle = "rgba(255,255,255,0.6)";
-      ctx.font = "600 16px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.textAlign = "center";
       ctx.fillText(`Question ${Math.min(this.roundIndex, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
     });
@@ -249,27 +249,4 @@ export class TriviaBuzzerDisplay implements DisplayGameModule {
     this.stage = null;
     this.ctx = null;
   }
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }

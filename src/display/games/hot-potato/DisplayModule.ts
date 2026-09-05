@@ -1,7 +1,7 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx, playNoiseBurst } from "@shared/audio";
@@ -202,29 +202,29 @@ export class HotPotatoDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🥔 Hot Potato", w / 2, h * 0.25);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.42 + i * 46, w * 0.78, 26));
       return;
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "600 15px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`Round ${Math.min(this.roundIndex, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 26);
 
     // A pulsing potato that gets faster with each pass this round — a *felt* sense of
     // rising tension without ever revealing the actual hidden fuse remaining.
     const pulseSpeed = 180 - Math.min(120, this.passCount * 12);
     const pulse = 0.7 + 0.3 * Math.sin(now / pulseSpeed);
-    ctx.font = `${Math.round(90 * pulse)}px sans-serif`;
+    ctx.font = `${Math.round(90 * pulse * uiScale(w, h))}px sans-serif`;
     ctx.fillText("🥔", w / 2, h * 0.42);
 
     if (this.phase === "holding" && this.holderId) {
       const holderColor = this.gameCtx!.players.find((p) => p.id === this.holderId)?.color ?? THEME.accent;
-      const cardW = Math.min(w * 0.68, 460);
-      const cardH = 108;
+      const cardW = Math.min(w * 0.68, 460 * uiScale(w, h));
+      const cardH = 108 * uiScale(w, h);
       const cardX = w / 2 - cardW / 2;
       const cardY = h * 0.565;
       ctx.save();
@@ -239,7 +239,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
 
       // Nameplate: a small colored pill behind the holder's name, matching how other
       // games present player identity (avatar-adjacent colored tag) rather than plain text.
-      ctx.font = "700 15px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
       const nameText = this.nameFor(this.holderId);
       const nameW = ctx.measureText(nameText).width;
       const pillW = nameW + 34;
@@ -257,14 +257,14 @@ export class HotPotatoDisplay implements DisplayGameModule {
       ctx.textBaseline = "alphabetic";
 
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.font = "600 18px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("is holding it!", w / 2, cardY + 68);
       ctx.fillStyle = "rgba(255,255,255,0.6)";
-      ctx.font = "600 15px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("Shake to pass!", w / 2, cardY + 92);
     } else if (this.phase === "reveal" && this.lastExplodedId) {
       ctx.fillStyle = "#FF453A";
-      ctx.font = "700 28px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(28 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`💥 ${this.nameFor(this.lastExplodedId)} got caught holding it!`, w / 2, h * 0.62);
     }
 
@@ -275,26 +275,4 @@ export class HotPotatoDisplay implements DisplayGameModule {
     this.stage?.dispose();
     this.stage = null;
   }
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }

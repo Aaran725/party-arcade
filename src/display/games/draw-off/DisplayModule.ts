@@ -2,7 +2,7 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries } from "@shared/word-bank";
-import { createStageCanvas, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { createStageCanvas, roundRect, drawSpecularEdge, uiScale } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -356,9 +356,9 @@ export class DrawOffDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🖼️ Draw-Off", w / 2, h * 0.25);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.42 + i * 46, w * 0.75, 26));
       return;
@@ -366,16 +366,16 @@ export class DrawOffDisplay implements DisplayGameModule {
 
     if (this.phase === "drawing") {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.font = "700 24px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`Draw: ${this.word}`, w / 2, h * 0.065);
       const remaining = Math.max(0, this.phaseDeadline - now);
-      ctx.font = "600 16px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.11);
 
       const players = this.connectedPlayers();
       const { cols, rows } = gridLayout(players.length);
-      const pad = 14;
+      const pad = Math.min(w, h) * (14 / 675);
       const top = h * 0.16;
       const cellW = (w - pad * (cols + 1)) / cols;
       const cellH = (h - top - pad * (rows + 1)) / rows;
@@ -410,7 +410,7 @@ export class DrawOffDisplay implements DisplayGameModule {
         drawSpecularEdge(ctx, x, y, cellW, cellH, cellRadius, 0.22);
 
         ctx.fillStyle = "rgba(255,255,255,0.8)";
-        ctx.font = "600 13px -apple-system, sans-serif";
+        ctx.font = `600 ${Math.round(13 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(p.name, x + cellW / 2, y + cellH - 8);
       });
       return;
@@ -418,10 +418,10 @@ export class DrawOffDisplay implements DisplayGameModule {
 
     if (this.phase === "judging") {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.font = "700 26px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🤖 AI is judging your drawings", w / 2, h * 0.46);
       const dots = ".".repeat((Math.floor(now / 400) % 3) + 1);
-      ctx.font = "600 24px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(dots, w / 2, h * 0.54);
       drawParticles(ctx, this.particles, now);
@@ -430,7 +430,7 @@ export class DrawOffDisplay implements DisplayGameModule {
 
     // reveal
     ctx.fillStyle = "rgba(255,255,255,0.95)";
-    ctx.font = "700 24px -apple-system, sans-serif";
+    ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`The word was: ${this.word}`, w / 2, h * 0.08);
 
     const rowH = Math.min(96, (h * 0.86) / Math.max(1, this.rankedResults.length));
@@ -454,17 +454,17 @@ export class DrawOffDisplay implements DisplayGameModule {
 
       ctx.textAlign = "left";
       ctx.fillStyle = "rgba(255,255,255,0.92)";
-      ctx.font = "700 18px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`#${r.rank}  ${this.nameFor(r.playerId)}`, w * 0.06 + thumbW + 18, y + rowH * 0.32);
-      ctx.font = "500 13px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(13 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.65)";
       ctx.fillText(r.comment, w * 0.06 + thumbW + 18, y + rowH * 0.6, w * 0.5);
 
       ctx.textAlign = "right";
-      ctx.font = "700 20px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = THEME.accent;
       ctx.fillText(`${r.score}/100`, w * 0.94, y + rowH * 0.35);
-      ctx.font = "600 14px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(14 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.7)";
       ctx.fillText(`+${r.points}`, w * 0.94, y + rowH * 0.6);
     });

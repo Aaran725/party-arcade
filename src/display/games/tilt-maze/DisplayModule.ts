@@ -1,6 +1,6 @@
 import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
-import { createStageCanvas } from "../../game-runtime/canvas";
+import { createStageCanvas, drawSpecularEdge, roundRect, uiScale } from "../../game-runtime/canvas";
 import { cellAt, generateMaze, type Maze } from "./maze";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
@@ -212,6 +212,21 @@ export class TiltMazeDisplay implements DisplayGameModule {
     setTimeout(() => this.gameCtx?.onGameOver(scores), 900);
   }
 
+  /** Small glass-chrome pill behind a centered HUD text label (e.g. the round timer), matching the shared badge look used elsewhere for floating overlay text. `ctx.font`/`textAlign` must already be set for the label; draw the label itself right after this call. */
+  private drawHudBadge(ctx: CanvasRenderingContext2D, cx: number, y: number, text: string, fontSizePx: number): void {
+    const textW = ctx.measureText(text).width;
+    const padX = fontSizePx * 0.55;
+    const padY = fontSizePx * 0.35;
+    const badgeW = textW + padX * 2;
+    const badgeH = fontSizePx * 0.97 + padY * 2;
+    const badgeX = cx - badgeW / 2;
+    const badgeY = y - fontSizePx * 0.75 - padY;
+    ctx.fillStyle = "rgba(20,16,32,0.45)";
+    roundRect(ctx, badgeX, badgeY, badgeW, badgeH, Math.min(badgeW, badgeH) * 0.25);
+    ctx.fill();
+    drawSpecularEdge(ctx, badgeX, badgeY, badgeW, badgeH, Math.min(badgeW, badgeH) * 0.25, 0.22);
+  }
+
   private draw(now: number, w: number, h: number, layout: Layout): void {
     const ctx = this.stage!.ctx;
     const { cellPx, originX, originY } = layout;
@@ -254,10 +269,14 @@ export class TiltMazeDisplay implements DisplayGameModule {
       drawPopups(ctx, this.popups, now);
 
       const remaining = Math.max(0, TIME_LIMIT_MS - (now - this.startedAt));
-      ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.font = "600 20px -apple-system, sans-serif";
+      const timerLabel = `${Math.ceil(remaining / 1000)}s`;
+      const timerFontSize = Math.round(20 * uiScale(w, h));
+      ctx.font = `600 ${timerFontSize}px -apple-system, sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, originY - 14 < 20 ? 20 : originY - 14);
+      const timerY = originY - 14 < 20 ? 20 : originY - 14;
+      this.drawHudBadge(ctx, w / 2, timerY, timerLabel, timerFontSize);
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.fillText(timerLabel, w / 2, timerY);
     });
   }
 

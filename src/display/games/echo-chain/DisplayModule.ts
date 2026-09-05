@@ -2,7 +2,7 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries } from "@shared/word-bank";
-import { createStageCanvas } from "../../game-runtime/canvas";
+import { createStageCanvas, uiScale, wrapText, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -32,28 +32,6 @@ function shuffle<T>(arr: T[]): T[] {
     [out[i], out[j]] = [out[j], out[i]];
   }
   return out;
-}
-
-function wrapText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, maxWidth: number, lineHeight: number): void {
-  const words = text.split(" ");
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const totalHeight = lines.length * lineHeight;
-  const startY = cy - totalHeight / 2 + lineHeight / 2;
-  const prevBaseline = ctx.textBaseline;
-  ctx.textBaseline = "middle";
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-  ctx.textBaseline = prevBaseline;
 }
 
 export class EchoChainDisplay implements DisplayGameModule {
@@ -271,9 +249,9 @@ export class EchoChainDisplay implements DisplayGameModule {
 
     if (this.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = "700 30px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🗣️ Echo Chain", w / 2, h * 0.25);
-      ctx.font = "500 19px -apple-system, sans-serif";
+      ctx.font = `500 ${Math.round(19 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       RULES_LINES.forEach((line, i) => wrapText(ctx, line, w / 2, h * 0.42 + i * 46, w * 0.78, 26));
       return;
@@ -281,34 +259,37 @@ export class EchoChainDisplay implements DisplayGameModule {
 
     // Chain status header, shown in every in-game phase.
     ctx.fillStyle = "rgba(255,255,255,0.6)";
-    ctx.font = "600 15px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`${this.chainWords.length} word${this.chainWords.length === 1 ? "" : "s"} in the chain`, w / 2, 26);
 
     ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.font = "700 34px -apple-system, sans-serif";
+    ctx.font = `700 ${Math.round(34 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(this.chainWords[this.chainWords.length - 1] ?? "", w / 2, h * 0.22);
 
     if (this.phase === "turn") {
+      this.drawGlassPanel(ctx, w * 0.08, h * 0.09, w * 0.84, h * 0.4);
       ctx.fillStyle = THEME.accent;
-      ctx.font = "700 24px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`${this.nameFor(this.currentPlayerId)}'s turn`, w / 2, h * 0.36);
       const remaining = Math.max(0, this.phaseDeadline - now);
       ctx.fillStyle = "rgba(255,255,255,0.7)";
-      ctx.font = "600 18px -apple-system, sans-serif";
+      ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.44);
     } else if (this.phase === "transcribing") {
+      this.drawGlassPanel(ctx, w * 0.08, h * 0.09, w * 0.84, h * 0.34);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
-      ctx.font = "700 22px -apple-system, sans-serif";
+      ctx.font = `700 ${Math.round(22 * uiScale(w, h))}px -apple-system, sans-serif`;
       const dots = ".".repeat((Math.floor(now / 400) % 3) + 1);
       ctx.fillText(`🎧 Listening${dots}`, w / 2, h * 0.4);
     } else if (this.phase === "reveal" && this.lastOutcome) {
+      this.drawGlassPanel(ctx, w * 0.08, h * 0.09, w * 0.84, h * 0.32);
       if (this.lastOutcome.type === "success") {
         ctx.fillStyle = "#30D158";
-        ctx.font = "700 26px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(`✅ "${this.lastOutcome.word}"`, w / 2, h * 0.38);
       } else {
         ctx.fillStyle = "#FF453A";
-        ctx.font = "700 26px -apple-system, sans-serif";
+        ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         const reason = this.lastOutcome.reason === "repeat" ? "repeated a word!" : "froze up!";
         ctx.fillText(`❌ ${this.nameFor(this.lastOutcome.playerId)} ${reason}`, w / 2, h * 0.38);
       }
@@ -317,7 +298,7 @@ export class EchoChainDisplay implements DisplayGameModule {
     // Roster strip along the bottom — green name = still in, dim/struck = eliminated.
     const players = this.connectedPlayers();
     const rowY = h * 0.9;
-    ctx.font = "600 14px -apple-system, sans-serif";
+    ctx.font = `600 ${Math.round(14 * uiScale(w, h))}px -apple-system, sans-serif`;
     const gap = Math.min(140, w / Math.max(1, players.length));
     const startX = w / 2 - (gap * (players.length - 1)) / 2;
     players.forEach((p, i) => {
@@ -327,6 +308,15 @@ export class EchoChainDisplay implements DisplayGameModule {
     });
 
     drawParticles(ctx, this.particles, now);
+  }
+
+  /** A themed glass card behind this phase's content — matches the roundRect+drawSpecularEdge chrome the rest of the roster already uses, previously missing here since Echo Chain drew straight onto the ambient background. */
+  private drawGlassPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+    const r = Math.min(w, h) * 0.08;
+    ctx.fillStyle = "rgba(20,16,32,0.45)";
+    roundRect(ctx, x, y, w, h, r);
+    ctx.fill();
+    drawSpecularEdge(ctx, x, y, w, h, r, 0.22);
   }
 
   destroy(): void {
