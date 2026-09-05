@@ -45,9 +45,31 @@ import { playWaveRipple } from "./host/waveRipple";
 
 type Phase = "connecting" | "lobby" | "select" | "party-setup" | "calibrate" | "game" | "party-next" | "gameover" | "party-recap" | "party-finale";
 
+// The room code used to live only in memory, so *reloading the TV tab* (or the browser
+// discarding a backgrounded tab) minted a brand-new code via display:create and stranded
+// every phone already in the room. Persisting it means a reload resumes the same room —
+// the server already supports display:resume and can even rehydrate from its own snapshot.
+const ROOM_CODE_KEY = "arcade:display-room";
+
+function loadStoredRoomCode(): string {
+  try {
+    return localStorage.getItem(ROOM_CODE_KEY) ?? "";
+  } catch {
+    return ""; // private browsing / storage disabled — falls back to minting a fresh room
+  }
+}
+
+function storeRoomCode(code: string): void {
+  try {
+    localStorage.setItem(ROOM_CODE_KEY, code);
+  } catch {
+    // Non-fatal: the room still works for this page load, it just won't survive a reload.
+  }
+}
+
 export class DisplayRouter {
   private phase: Phase = "connecting";
-  private roomCode = "";
+  private roomCode = loadStoredRoomCode();
   private lanUrl = "";
   private games: GameMeta[] = [];
   private players = new Map<string, PlayerInfo>();
@@ -299,6 +321,7 @@ export class DisplayRouter {
     switch (msg.type) {
       case "room:created":
         this.roomCode = msg.roomCode;
+        storeRoomCode(msg.roomCode);
         this.lanUrl = msg.lanUrl;
         this.games = msg.games;
         this.players.clear();
@@ -310,6 +333,7 @@ export class DisplayRouter {
 
       case "room:resumed": {
         this.roomCode = msg.roomCode;
+        storeRoomCode(msg.roomCode);
         this.lanUrl = msg.lanUrl;
         this.games = msg.games;
         this.players.clear();

@@ -2,6 +2,8 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -73,6 +75,10 @@ export class PushBattleDisplay implements DisplayGameModule {
   private championId: string | null = null;
 
   private currentMatch: [string, string] | null = null;
+  // The just-finished match, kept alive for the round_result screen. resolveMatch() has to
+  // clear currentMatch immediately (sendRoles() and prediction input both key off it), so the
+  // result branch of draw() reads this instead.
+  private resolvedMatch: { pair: [string, string]; winnerId: string } | null = null;
   private meter = 0; // negative leans toward currentMatch[0], positive toward currentMatch[1]
   private battleStartedAt = 0;
   private reactionGate = new ReactionGate();
@@ -80,9 +86,28 @@ export class PushBattleDisplay implements DisplayGameModule {
   // small bonus — reset per match, scored the instant that match resolves.
   private predictions = new Map<string, string>();
 
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
   private lastRankedResults: RankedResult[] = [];
+
+  private readonly phases = new PhaseMachine<Phase>("rules", {
+    rules: { onExpire: () => this.startNextRound() },
+    matchup_intro: { onExpire: () => this.beginBattle() },
+    battle: {
+      // Per-frame physics, not a countdown: the meter relaxes toward center off `dt` so an
+      // idle lead erodes and a comeback is always possible.
+      onFrame: (_now, _remaining, dt) => {
+        if (this.meter > 0) this.meter = Math.max(0, this.meter - DECAY_PER_SEC * dt);
+        else if (this.meter < 0) this.meter = Math.min(0, this.meter + DECAY_PER_SEC * dt);
+      },
+      // The battle also ends early when a meter maxes out (see onInput) — that's a transition,
+      // not endEarlyWhen. This is only the safety cap: whoever's ahead takes it.
+      onExpire: () => {
+        if (!this.currentMatch) return;
+        const [a, b] = this.currentMatch;
+        this.resolveMatch(this.meter <= 0 ? a : b);
+      },
+    },
+    round_result: { onExpire: () => this.startNextRound() },
+  });
 
   private particles: Particle[] = [];
 
@@ -98,12 +123,12 @@ export class PushBattleDisplay implements DisplayGameModule {
     this.eliminationRound.clear();
     this.championId = null;
     this.currentMatch = null;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.resolvedMatch = null;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private nameFor(id: string): string {
@@ -157,15 +182,13 @@ export class PushBattleDisplay implements DisplayGameModule {
     this.currentMatch = [a, b];
     this.meter = 0;
     this.predictions.clear();
-    this.phase = "matchup_intro";
-    this.phaseDeadline = performance.now() + MATCHUP_INTRO_MS;
+    this.phases.setPhase("matchup_intro", MATCHUP_INTRO_MS);
     this.sendRoles();
   }
 
   private beginBattle(): void {
-    this.phase = "battle";
     this.battleStartedAt = performance.now();
-    this.phaseDeadline = this.battleStartedAt + BATTLE_SAFETY_CAP_MS;
+    this.phases.setPhase("battle", BATTLE_SAFETY_CAP_MS, this.battleStartedAt);
     sfx.roundStart();
   }
 
@@ -174,6 +197,10 @@ export class PushBattleDisplay implements DisplayGameModule {
     const loserId = winnerId === a ? b : a;
     this.eliminationRound.set(loserId, this.roundIndex);
     this.nextRound.push(winnerId);
+    // Stash the pair + winner before clearing currentMatch: draw()'s head-to-head layout is
+    // gated on having a match, so nulling it here used to blank the entire round_result
+    // screen — the "<winner> wins the match!" line was never reachable.
+    this.resolvedMatch = { pair: [a, b], winnerId };
     this.currentMatch = null;
 
     const ctx = this.gameCtx!;
@@ -198,8 +225,7 @@ export class PushBattleDisplay implements DisplayGameModule {
       this.reactionGate.fire(ctx.hostSpeak, pickCloseCallLine());
     }
 
-    this.phase = "round_result";
-    this.phaseDeadline = performance.now() + ROUND_RESULT_MS;
+    this.phases.setPhase("round_result", ROUND_RESULT_MS);
     this.sendRoles();
   }
 
@@ -219,7 +245,8 @@ export class PushBattleDisplay implements DisplayGameModule {
       ctx.onScoreUpdate(r.playerId, score);
     }
 
-    this.phase = "tournament_result";
+    // No deadline: the results board stays up until finish() fires the game-over below.
+    this.phases.setPhase("tournament_result");
     this.sendRoles();
     const canvas = this.stage!.canvas;
     const dpr = window.devicePixelRatio || 1;
@@ -227,7 +254,9 @@ export class PushBattleDisplay implements DisplayGameModule {
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : [THEME.accent], 70));
     sfx.gameOverFanfare();
     ctx.hostSpeak(winnerId ? `And the Push Battle champion is... ${this.nameFor(winnerId)}!` : "Push Battle is over — nobody was left standing.");
-    setTimeout(() => ctx.onGameOver(this.getScores()), 4000);
+    // finish() halts phase dispatch and is idempotent, so a re-entrant bracket advance can't
+    // stack confetti bursts or fire game-over twice.
+    this.phases.finish(4000, () => ctx.onGameOver(this.getScores()));
   }
 
   getScores(): Record<string, number> {
@@ -243,7 +272,7 @@ export class PushBattleDisplay implements DisplayGameModule {
       return;
     }
     if (msg.type !== "input:button" || !msg.pressed) return;
-    if (this.phase !== "battle" || !this.currentMatch) return;
+    if (this.phases.phase !== "battle" || !this.currentMatch) return;
     const [a, b] = this.currentMatch;
     if (playerId === a) this.meter = Math.max(-METER_MAX, this.meter - PUSH_IMPULSE);
     else if (playerId === b) this.meter = Math.min(METER_MAX, this.meter + PUSH_IMPULSE);
@@ -267,27 +296,7 @@ export class PushBattleDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.startNextRound();
-        break;
-      case "matchup_intro":
-        if (now >= this.phaseDeadline) this.beginBattle();
-        break;
-      case "battle": {
-        // Decay toward center — an idle lead erodes, so a comeback is always possible.
-        if (this.meter > 0) this.meter = Math.max(0, this.meter - DECAY_PER_SEC * dt);
-        else if (this.meter < 0) this.meter = Math.min(0, this.meter + DECAY_PER_SEC * dt);
-        if (now >= this.phaseDeadline && this.currentMatch) {
-          const [a, b] = this.currentMatch;
-          this.resolveMatch(this.meter <= 0 ? a : b);
-        }
-        break;
-      }
-      case "round_result":
-        if (now >= this.phaseDeadline) this.startNextRound();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -304,7 +313,7 @@ export class PushBattleDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🤜 Push Battle", w / 2, h * 0.22);
@@ -314,7 +323,7 @@ export class PushBattleDisplay implements DisplayGameModule {
       return;
     }
 
-    if (this.phase === "tournament_result") {
+    if (this.phases.phase === "tournament_result") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(this.championId ? `🏆 ${this.nameFor(this.championId)} wins it all!` : "Tournament over", w / 2, h * 0.14);
@@ -335,9 +344,13 @@ export class PushBattleDisplay implements DisplayGameModule {
       return;
     }
 
-    // matchup_intro / battle / round_result all share the head-to-head layout
-    if (this.currentMatch) {
-      const [a, b] = this.currentMatch;
+    // matchup_intro / battle / round_result all share the head-to-head layout. round_result
+    // falls back to the resolved match because resolveMatch() clears currentMatch as soon as
+    // the bracket advances — gating on currentMatch alone left this whole screen blank.
+    const resolved = this.phases.phase === "round_result" ? this.resolvedMatch : null;
+    const match = resolved?.pair ?? this.currentMatch;
+    if (match) {
+      const [a, b] = match;
       const pa = this.connectedPlayers().find((p) => p.id === a);
       const pb = this.connectedPlayers().find((p) => p.id === b);
 
@@ -350,7 +363,7 @@ export class PushBattleDisplay implements DisplayGameModule {
       ctx.fillText(pb?.name ?? "?", w * 0.92, h * 0.14);
       ctx.textAlign = "center";
 
-      if (this.phase === "matchup_intro") {
+      if (this.phases.phase === "matchup_intro") {
         ctx.fillStyle = "rgba(255,255,255,0.7)";
         ctx.font = `600 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("Get ready…", w / 2, h * 0.4);
@@ -388,8 +401,8 @@ export class PushBattleDisplay implements DisplayGameModule {
       ctx.lineTo(midX, barY + barH + 8);
       ctx.stroke();
 
-      if (this.phase === "round_result") {
-        const winnerId = this.meter <= 0 ? a : b;
+      if (resolved) {
+        const winnerId = resolved.winnerId;
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(`${this.nameFor(winnerId)} wins the match!`, w / 2, h * 0.65);

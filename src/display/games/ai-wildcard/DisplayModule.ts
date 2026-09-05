@@ -2,6 +2,8 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage, WildcardMechanic } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { createStageCanvas, uiScale, wrapText, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -49,11 +51,28 @@ export class AiWildcardDisplay implements DisplayGameModule {
   private connectedIds = new Set<string>();
 
   private roundIndex = 0;
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
   private round: Round | null = null;
   private roundData: WildcardRoundData | null = null;
   private lastRoundResults: RankedResult[] = [];
+
+  private readonly phases = new PhaseMachine<Phase>("rules", {
+    rules: { onExpire: () => this.startRound() },
+    waiting_wildcard: { onExpire: () => this.beginActive(LOCAL_FALLBACK) },
+    active: {
+      onExpire: () => this.resolveRound(),
+      // Every mechanic knows whether a given player has committed an answer (the same
+      // check draw() uses for its ✓ list), so once everyone has, waiting out the rest of
+      // the 15s is dead air.
+      endEarlyWhen: () => {
+        const round = this.round;
+        if (!round) return false;
+        const handler = WILDCARD_MECHANICS[round.mechanic];
+        const players = this.connectedPlayers();
+        return players.length > 0 && players.every((p) => handler.hasAnswered(p.id));
+      },
+    },
+    result: { onExpire: () => this.startRound() },
+  });
 
   private particles: Particle[] = [];
 
@@ -64,12 +83,11 @@ export class AiWildcardDisplay implements DisplayGameModule {
     this.connectedIds = new Set(ctx.players.map((p) => p.id));
     for (const p of ctx.players) this.scores.set(p.id, 0);
     this.roundIndex = 0;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private nameFor(id: string): string {
@@ -83,8 +101,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
     }
     this.round = null;
     this.roundData = null;
-    this.phase = "waiting_wildcard";
-    this.phaseDeadline = performance.now() + WILDCARD_TIMEOUT_MS;
+    this.phases.setPhase("waiting_wildcard", WILDCARD_TIMEOUT_MS);
     this.gameCtx!.requestWildcard();
     sfx.uiTap();
   }
@@ -108,14 +125,13 @@ export class AiWildcardDisplay implements DisplayGameModule {
         targetHeading: round.mechanic === "aim" ? secret : undefined,
       });
     }
-    this.phase = "active";
-    this.phaseDeadline = performance.now() + ACTIVE_MS;
+    this.phases.setPhase("active", ACTIVE_MS);
     sfx.roundStart();
     ctx.hostSpeak(round.choices ? `${round.prompt} Your options: ${round.choices.join(", ")}.` : round.prompt);
   }
 
   onWildcardResult(round: { mechanic: WildcardMechanic; prompt: string; choices?: string[] }): void {
-    if (this.phase !== "waiting_wildcard") return;
+    if (this.phases.phase !== "waiting_wildcard") return;
     this.beginActive(round);
   }
 
@@ -133,8 +149,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
     if (this.lastRoundResults.length > 0) sfx.hit(2);
     else sfx.miss();
 
-    this.phase = "result";
-    this.phaseDeadline = performance.now() + RESULT_MS;
+    this.phases.setPhase("result", RESULT_MS);
     this.roundIndex += 1;
   }
 
@@ -145,7 +160,10 @@ export class AiWildcardDisplay implements DisplayGameModule {
     const colors = this.connectedPlayers().map((p) => p.color);
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : [THEME.accent], 70));
     sfx.gameOverFanfare();
-    setTimeout(() => ctx.onGameOver(this.getScores()), 900);
+    // finish() halts phase dispatch and is idempotent. Previously this left `phase`/
+    // `phaseDeadline` untouched, so the already-expired phase re-ran startRound() → this
+    // method every frame for the full 900ms: ~54 confetti bursts and fanfares stacked up.
+    this.phases.finish(900, () => ctx.onGameOver(this.getScores()));
   }
 
   getScores(): Record<string, number> {
@@ -155,7 +173,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
   }
 
   onInput(playerId: string, msg: InputMessage): void {
-    if (this.phase !== "active" || !this.connectedIds.has(playerId) || !this.round) return;
+    if (this.phases.phase !== "active" || !this.connectedIds.has(playerId) || !this.round) return;
     WILDCARD_MECHANICS[this.round.mechanic].handleInput(playerId, msg);
   }
 
@@ -168,20 +186,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-      case "waiting_wildcard":
-        if (now >= this.phaseDeadline) this.beginActive(LOCAL_FALLBACK);
-        break;
-      case "active":
-        if (now >= this.phaseDeadline) this.resolveRound();
-        break;
-      case "result":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -198,7 +203,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🎲 AI Wildcard", w / 2, h * 0.22);
@@ -212,7 +217,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
     ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`Round ${Math.min(this.roundIndex + 1, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
-    if (this.phase === "waiting_wildcard") {
+    if (this.phases.phase === "waiting_wildcard") {
       this.drawGlassPanel(ctx, w * 0.2, h * 0.36, w * 0.6, h * 0.18);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
@@ -221,7 +226,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
       return;
     }
 
-    if (this.phase === "active" && this.round) {
+    if (this.phases.phase === "active" && this.round) {
       const handler = WILDCARD_MECHANICS[this.round.mechanic];
       this.drawGlassPanel(ctx, w * 0.08, h * 0.08, w * 0.84, h * 0.42);
       ctx.fillStyle = "rgba(255,255,255,0.65)";
@@ -236,7 +241,7 @@ export class AiWildcardDisplay implements DisplayGameModule {
         wrapText(ctx, this.round.choices.join("  vs  "), w / 2, h * 0.38, w * 0.75, 26);
       }
       handler.drawExtra?.(ctx, w / 2, h * 0.36, w, h, this.roundData!, THEME.accent);
-      const remaining = Math.max(0, this.phaseDeadline - now);
+      const remaining = this.phases.remaining(now);
       ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.46);

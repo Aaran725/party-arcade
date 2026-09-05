@@ -3,6 +3,8 @@ import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries } from "@shared/word-bank";
 import { createStageCanvas, roundRect, drawSpecularEdge, uiScale } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -82,10 +84,18 @@ export class DrawOffDisplay implements DisplayGameModule {
   private connectedIds = new Set<string>();
 
   private word = "";
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
-  private lastCountdownTickAt = 0;
   private resultsFinalized = false;
+
+  private readonly phases = new PhaseMachine<Phase>(
+    "rules",
+    {
+      rules: { onExpire: () => this.beginDrawing() },
+      drawing: { onExpire: () => this.beginJudging(), countdownTicks: true },
+      judging: { onExpire: () => this.finalizeResults(new Map()) },
+      // "reveal" is terminal — entered with no deadline, held open by phases.finish().
+    },
+    { onCountdownTick: () => sfx.countdownTick(true) },
+  );
 
   private canvases = new Map<string, HTMLCanvasElement>();
   private canvasCtxs = new Map<string, CanvasRenderingContext2D>();
@@ -115,13 +125,12 @@ export class DrawOffDisplay implements DisplayGameModule {
       this.strokeHistory.set(p.id, []);
     }
     this.word = drawWordEntries(1)[0].word;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
     this.resultsFinalized = false;
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private nameFor(id: string): string {
@@ -131,9 +140,7 @@ export class DrawOffDisplay implements DisplayGameModule {
   private beginDrawing(): void {
     const ctx = this.gameCtx!;
     for (const p of this.connectedPlayers()) ctx.sendPrivate(p.id, { word: this.word });
-    this.phase = "drawing";
-    this.phaseDeadline = performance.now() + DRAWING_MS;
-    this.lastCountdownTickAt = 0;
+    this.phases.setPhase("drawing", DRAWING_MS);
     sfx.roundStart();
   }
 
@@ -148,8 +155,7 @@ export class DrawOffDisplay implements DisplayGameModule {
       submissions.push({ playerId: p.id, imageData: canvas.toDataURL("image/png") });
     }
     ctx.requestRating(this.word, submissions);
-    this.phase = "judging";
-    this.phaseDeadline = performance.now() + JUDGING_TIMEOUT_MS;
+    this.phases.setPhase("judging", JUDGING_TIMEOUT_MS);
     sfx.uiTap();
 
     this.predictions.clear();
@@ -158,7 +164,7 @@ export class DrawOffDisplay implements DisplayGameModule {
   }
 
   onRatingsResult(ratings: { playerId: string; score: number | null; comment: string | null }[]): void {
-    if (this.phase !== "judging" || this.resultsFinalized) return;
+    if (this.phases.phase !== "judging" || this.resultsFinalized) return;
     const byId = new Map(ratings.map((r) => [r.playerId, r]));
     this.finalizeResults(byId);
   }
@@ -204,7 +210,8 @@ export class DrawOffDisplay implements DisplayGameModule {
       }
     }
 
-    this.phase = "reveal";
+    // Terminal phase: no deadline of its own — phases.finish() below holds it until game-over.
+    this.phases.setPhase("reveal");
     const canvas = this.stage!.canvas;
     const dpr = window.devicePixelRatio || 1;
     const winnerColor = this.connectedPlayers().find((p) => p.id === this.rankedResults[0]?.playerId)?.color;
@@ -218,7 +225,7 @@ export class DrawOffDisplay implements DisplayGameModule {
         ctx.setHighlight(winnerCanvas.toDataURL("image/png"), `${this.nameFor(winner.playerId)}'s winning drawing — ${winner.score}/100`);
       }
     }
-    setTimeout(() => ctx.onGameOver(this.getScores()), REVEAL_HOLD_MS);
+    this.phases.finish(REVEAL_HOLD_MS, () => ctx.onGameOver(this.getScores()));
   }
 
   private drawStroke(playerId: string, msg: Extract<InputMessage, { type: "input:draw" }>): void {
@@ -298,12 +305,12 @@ export class DrawOffDisplay implements DisplayGameModule {
 
   onInput(playerId: string, msg: InputMessage): void {
     if (msg.type === "input:prediction") {
-      if (this.phase !== "judging" || !this.connectedIds.has(playerId)) return;
+      if (this.phases.phase !== "judging" || !this.connectedIds.has(playerId)) return;
       if (this.connectedIds.has(msg.targetPlayerId)) this.predictions.set(playerId, msg.targetPlayerId);
       return;
     }
     if (msg.type !== "input:draw") return;
-    if (this.phase !== "drawing" || !this.connectedIds.has(playerId)) return;
+    if (this.phases.phase !== "drawing" || !this.connectedIds.has(playerId)) return;
     this.drawStroke(playerId, msg);
   }
 
@@ -321,23 +328,7 @@ export class DrawOffDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.beginDrawing();
-        break;
-      case "drawing": {
-        const remaining = this.phaseDeadline - now;
-        if (remaining <= 3000 && now - this.lastCountdownTickAt >= 1000) {
-          this.lastCountdownTickAt = now;
-          sfx.countdownTick(true);
-        }
-        if (remaining <= 0) this.beginJudging();
-        break;
-      }
-      case "judging":
-        if (now >= this.phaseDeadline) this.finalizeResults(new Map());
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -354,7 +345,7 @@ export class DrawOffDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🖼️ Draw-Off", w / 2, h * 0.25);
@@ -364,11 +355,11 @@ export class DrawOffDisplay implements DisplayGameModule {
       return;
     }
 
-    if (this.phase === "drawing") {
+    if (this.phases.phase === "drawing") {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`Draw: ${this.word}`, w / 2, h * 0.065);
-      const remaining = Math.max(0, this.phaseDeadline - now);
+      const remaining = this.phases.remaining(now);
       ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.11);
@@ -416,7 +407,7 @@ export class DrawOffDisplay implements DisplayGameModule {
       return;
     }
 
-    if (this.phase === "judging") {
+    if (this.phases.phase === "judging") {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🤖 AI is judging your drawings", w / 2, h * 0.46);

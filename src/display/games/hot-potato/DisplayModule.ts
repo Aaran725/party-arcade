@@ -2,6 +2,8 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx, playNoiseBurst } from "@shared/audio";
@@ -41,9 +43,15 @@ export class HotPotatoDisplay implements DisplayGameModule {
   private passCount = 0;
   private reactionGate = new ReactionGate();
 
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
   private lastExplodedId: string | null = null;
+
+  private readonly phases = new PhaseMachine<Phase>("rules", {
+    rules: { onExpire: () => this.startRound() },
+    // No countdownTicks here on purpose: the fuse is hidden, and an audible countdown
+    // would give away exactly what this game withholds.
+    holding: { onExpire: () => this.explode() },
+    reveal: { onExpire: () => this.startRound() },
+  });
 
   private particles: Particle[] = [];
 
@@ -55,12 +63,11 @@ export class HotPotatoDisplay implements DisplayGameModule {
     for (const p of ctx.players) this.scores.set(p.id, 0);
     this.roundIndex = 0;
     this.holderId = null;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private nameFor(id: string): string {
@@ -76,8 +83,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
     const players = this.connectedPlayers();
     this.holderId = players[Math.floor(Math.random() * players.length)].id;
     this.passCount = 0;
-    this.phase = "holding";
-    this.phaseDeadline = performance.now() + MIN_FUSE_MS + Math.random() * (MAX_FUSE_MS - MIN_FUSE_MS);
+    this.phases.setPhase("holding", MIN_FUSE_MS + Math.random() * (MAX_FUSE_MS - MIN_FUSE_MS));
     this.notifyHolder();
     sfx.roundStart();
   }
@@ -108,13 +114,13 @@ export class HotPotatoDisplay implements DisplayGameModule {
   }
 
   onInput(playerId: string, msg: InputMessage): void {
-    if (this.phase !== "holding" || msg.type !== "input:tap" || playerId !== this.holderId) return;
+    if (this.phases.phase !== "holding" || msg.type !== "input:tap" || playerId !== this.holderId) return;
     const now = performance.now();
     if (now - this.lastPassAt < PASS_COOLDOWN_MS) return;
     this.lastPassAt = now;
     // The Display knows the hidden fuse deadline even though players never see it — a
     // pass landing this close to it is a real "phew, just in time" moment worth a reaction.
-    if (this.phaseDeadline - now < LAST_SECOND_PASS_MS && this.gameCtx) {
+    if (this.phases.remaining(now) < LAST_SECOND_PASS_MS && this.gameCtx) {
       this.reactionGate.fire(this.gameCtx.hostSpeak, pickCloseCallLine());
     }
     this.passPotato();
@@ -125,7 +131,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
     // Deliberately NOT this.scores.delete(playerId) — every sibling game leaves a leaving
     // player's already-earned score in place so getScores() still credits it; deleting it
     // here wiped out however many rounds they'd already survived the instant they left.
-    if (playerId === this.holderId && this.phase === "holding") this.passPotato();
+    if (playerId === this.holderId && this.phases.phase === "holding") this.passPotato();
   }
 
   private explode(): void {
@@ -149,8 +155,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
     this.particles.push(...spawnBurst(w / 2, h * 0.45, "#3a2a1a", 26, { speed: 220, kind: "spark" }));
     playNoiseBurst({ duration: 0.4, gain: 0.4, filterFreq: 280 });
 
-    this.phase = "reveal";
-    this.phaseDeadline = performance.now() + REVEAL_MS;
+    this.phases.setPhase("reveal", REVEAL_MS);
   }
 
   private finishGame(): void {
@@ -160,7 +165,10 @@ export class HotPotatoDisplay implements DisplayGameModule {
     const colors = this.connectedPlayers().map((p) => p.color);
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : [THEME.accent], 70));
     sfx.gameOverFanfare();
-    setTimeout(() => ctx.onGameOver(this.getScores()), 900);
+    // finish() halts phase dispatch and is idempotent. Previously this left `phase`/
+    // `phaseDeadline` untouched, so the already-expired phase re-ran startRound() → this
+    // method every frame for the full 900ms: ~54 confetti bursts and fanfares stacked up.
+    this.phases.finish(900, () => ctx.onGameOver(this.getScores()));
   }
 
   getScores(): Record<string, number> {
@@ -173,17 +181,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-      case "holding":
-        if (now >= this.phaseDeadline) this.explode();
-        break;
-      case "reveal":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -200,7 +198,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🥔 Hot Potato", w / 2, h * 0.25);
@@ -221,7 +219,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
     ctx.font = `${Math.round(90 * pulse * uiScale(w, h))}px sans-serif`;
     ctx.fillText("🥔", w / 2, h * 0.42);
 
-    if (this.phase === "holding" && this.holderId) {
+    if (this.phases.phase === "holding" && this.holderId) {
       const holderColor = this.gameCtx!.players.find((p) => p.id === this.holderId)?.color ?? THEME.accent;
       const cardW = Math.min(w * 0.68, 460 * uiScale(w, h));
       const cardH = 108 * uiScale(w, h);
@@ -262,7 +260,7 @@ export class HotPotatoDisplay implements DisplayGameModule {
       ctx.fillStyle = "rgba(255,255,255,0.6)";
       ctx.font = `600 ${Math.round(15 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("Shake to pass!", w / 2, cardY + 92);
-    } else if (this.phase === "reveal" && this.lastExplodedId) {
+    } else if (this.phases.phase === "reveal" && this.lastExplodedId) {
       ctx.fillStyle = "#FF453A";
       ctx.font = `700 ${Math.round(28 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`💥 ${this.nameFor(this.lastExplodedId)} got caught holding it!`, w / 2, h * 0.62);

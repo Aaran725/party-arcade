@@ -3,6 +3,8 @@ import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries, type WordEntry } from "@shared/word-bank";
 import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { type ShakeState, createShakeState, triggerShake, withShake } from "../../game-runtime/shake";
@@ -52,14 +54,44 @@ export class SleeperAgentDisplay implements DisplayGameModule {
   private agentId = "";
   private previousAgentId: string | null = null;
   private entry: WordEntry | null = null;
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
   private votes = new Map<string, string>();
   private agentCaught = false;
   private redemptionChoices: string[] = [];
   private redemptionResult: boolean | null = null;
   private resultFlash: string | null = null;
-  private lastCountdownTickAt = 0;
+
+  private readonly phases = new PhaseMachine<Phase>(
+    "rules",
+    {
+      rules: { onExpire: () => this.startRound() },
+      // No endEarlyWhen here on purpose: 45s of people talking out loud has no completion signal.
+      discussion: { countdownTicks: true, onExpire: () => this.beginVoting() },
+      voting: {
+        endEarlyWhen: () => {
+          const players = this.connectedPlayers();
+          return players.length > 0 && players.every((p) => this.votes.has(p.id));
+        },
+        onExpire: () => this.resolveVote(),
+      },
+      // Reused for two different beats (the vote result, then the redemption result), so its
+      // expiry branches on whether a redemption result exists yet.
+      resolution: {
+        onExpire: () => {
+          if (this.redemptionResult !== null) this.finalizeRound();
+          else this.beginRedemption();
+        },
+      },
+      redemption: {
+        onExpire: () => {
+          this.redemptionResult = false;
+          this.resultFlash = "Time's up.";
+          this.phases.setPhase("resolution", RESOLUTION_MS);
+        },
+      },
+      between: { onExpire: () => this.startRound() },
+    },
+    { onCountdownTick: () => sfx.countdownTick(true) },
+  );
 
   private particles: Particle[] = [];
   private popups: Popup[] = [];
@@ -73,12 +105,11 @@ export class SleeperAgentDisplay implements DisplayGameModule {
     for (const p of ctx.players) this.scores.set(p.id, 0);
     this.roundIndex = 0;
     this.previousAgentId = null;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private startRound(): void {
@@ -107,9 +138,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       );
     }
 
-    this.phase = "discussion";
-    this.phaseDeadline = performance.now() + DISCUSSION_MS;
-    this.lastCountdownTickAt = 0;
+    this.phases.setPhase("discussion", DISCUSSION_MS);
     sfx.roundStart();
   }
 
@@ -119,8 +148,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
     for (const p of this.connectedPlayers()) {
       ctx.sendPrivate(p.id, { phase: "vote", players: roster });
     }
-    this.phase = "voting";
-    this.phaseDeadline = performance.now() + VOTE_MS;
+    this.phases.setPhase("voting", VOTE_MS);
   }
 
   private resolveVote(): void {
@@ -163,8 +191,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
     triggerShake(this.shake, 6, 200);
     this.particles.push(...spawnBurst(canvas.width / dpr / 2, canvas.height / dpr / 2, this.agentCaught ? "#30D158" : "#FF453A", 30, { speed: 180 }));
 
-    this.phase = "resolution";
-    this.phaseDeadline = performance.now() + RESOLUTION_MS;
+    this.phases.setPhase("resolution", RESOLUTION_MS);
   }
 
   private beginRedemption(): void {
@@ -172,8 +199,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
     this.redemptionChoices = shuffle([this.entry!.word, ...this.entry!.decoys]);
     if (this.connectedIds.has(this.agentId)) {
       ctx.sendPrivate(this.agentId, { phase: "redemption", choices: this.redemptionChoices });
-      this.phase = "redemption";
-      this.phaseDeadline = performance.now() + REDEMPTION_MS;
+      this.phases.setPhase("redemption", REDEMPTION_MS);
     } else {
       this.finalizeRound();
     }
@@ -184,31 +210,32 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       this.finishGame();
       return;
     }
-    this.phase = "between";
-    this.phaseDeadline = performance.now() + BETWEEN_ROUNDS_MS;
+    this.phases.setPhase("between", BETWEEN_ROUNDS_MS);
   }
 
   private finishGame(): void {
     const ctx = this.gameCtx!;
-    this.phase = "between";
-    this.phaseDeadline = Infinity;
+    // "between" is the deadline-less holding screen the game-over confetti plays over; the
+    // halt itself is now finish()'s job rather than an ad-hoc `phaseDeadline = Infinity`.
+    this.phases.setPhase("between");
     const canvas = this.stage!.canvas;
     const dpr = window.devicePixelRatio || 1;
     const colors = this.connectedPlayers().map((p) => p.color);
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : ["#FF453A"], 60));
     sfx.gameOverFanfare();
-    setTimeout(() => ctx.onGameOver(this.getScores()), 900);
+    // finish() halts phase dispatch and is idempotent, so a re-entrant call can't stack fanfares.
+    this.phases.finish(900, () => ctx.onGameOver(this.getScores()));
   }
 
   onInput(playerId: string, msg: InputMessage): void {
     if (msg.type !== "input:button" || !msg.pressed) return;
-    if (this.phase === "voting") {
+    if (this.phases.phase === "voting") {
       if (playerId === msg.buttonId) return; // defensive — client already excludes self from the grid
       if (!this.connectedIds.has(playerId)) return;
       this.votes.set(playerId, msg.buttonId);
       return;
     }
-    if (this.phase === "redemption" && playerId === this.agentId) {
+    if (this.phases.phase === "redemption" && playerId === this.agentId) {
       const idx = Number(msg.buttonId);
       const correct = this.redemptionChoices[idx] === this.entry!.word;
       this.redemptionResult = correct;
@@ -221,8 +248,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       } else {
         sfx.miss();
       }
-      this.phase = "resolution"; // reuse the flash beat to show the redemption result briefly
-      this.phaseDeadline = performance.now() + RESOLUTION_MS;
+      this.phases.setPhase("resolution", RESOLUTION_MS); // reuse the flash beat to show the redemption result briefly
       this.resultFlash = correct ? "Correct guess! +5" : "Wrong guess.";
     }
   }
@@ -230,10 +256,9 @@ export class SleeperAgentDisplay implements DisplayGameModule {
   onPlayerLeave(playerId: string): void {
     this.connectedIds.delete(playerId);
     this.votes.delete(playerId);
-    if (playerId === this.agentId && (this.phase === "discussion" || this.phase === "voting")) {
+    if (playerId === this.agentId && (this.phases.phase === "discussion" || this.phases.phase === "voting")) {
       this.resultFlash = "Agent disconnected — skipping round";
-      this.phase = "resolution";
-      this.phaseDeadline = performance.now() + RESOLUTION_MS;
+      this.phases.setPhase("resolution", RESOLUTION_MS);
     }
   }
 
@@ -247,38 +272,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-      case "discussion":
-        if (now >= this.phaseDeadline) this.beginVoting();
-        else if (this.phaseDeadline - now <= 3000 && now - this.lastCountdownTickAt >= 1000) {
-          this.lastCountdownTickAt = now;
-          sfx.countdownTick(true);
-        }
-        break;
-      case "voting":
-        if (now >= this.phaseDeadline) this.resolveVote();
-        break;
-      case "resolution":
-        if (now >= this.phaseDeadline) {
-          if (this.redemptionResult !== null) this.finalizeRound();
-          else this.beginRedemption();
-        }
-        break;
-      case "redemption":
-        if (now >= this.phaseDeadline) {
-          this.redemptionResult = false;
-          this.resultFlash = "Time's up.";
-          this.phase = "resolution";
-          this.phaseDeadline = now + RESOLUTION_MS;
-        }
-        break;
-      case "between":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.popups = stepPopups(this.popups, now);
@@ -298,7 +292,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
     withShake(ctx, this.shake, now, () => {
       ctx.textAlign = "center";
 
-      if (this.phase === "rules") {
+      if (this.phases.phase === "rules") {
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("🕵️ Sleeper Agent", w / 2, h * 0.2);
@@ -316,7 +310,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
       ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`Round ${Math.min(this.roundIndex, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
-      if (this.phase === "discussion") {
+      if (this.phases.phase === "discussion") {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
         ctx.font = `600 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         wrapText(ctx, `Category: ${this.entry?.category ?? ""}`, w / 2, h * 0.4, w * 0.8, 34);
@@ -324,17 +318,17 @@ export class SleeperAgentDisplay implements DisplayGameModule {
         ctx.fillStyle = "rgba(255,255,255,0.7)";
         wrapText(ctx, "Discuss out loud — figure out who's the Agent.", w / 2, h * 0.5, w * 0.7, 26);
         this.drawCountdown(ctx, w, h, now);
-      } else if (this.phase === "voting") {
+      } else if (this.phases.phase === "voting") {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
         ctx.font = `600 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("Vote on your phone", w / 2, h * 0.35);
         this.drawCountdown(ctx, w, h, now);
         this.drawVoteTally(ctx, w, h);
-      } else if (this.phase === "resolution") {
+      } else if (this.phases.phase === "resolution") {
         ctx.fillStyle = this.agentCaught || this.redemptionResult ? "#30D158" : "#FF453A";
         ctx.font = `700 ${Math.round(36 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText(this.resultFlash ?? "", w / 2, h * 0.45);
-      } else if (this.phase === "redemption") {
+      } else if (this.phases.phase === "redemption") {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
         ctx.font = `600 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
         ctx.fillText("Agent is choosing a final guess…", w / 2, h * 0.45);
@@ -346,7 +340,7 @@ export class SleeperAgentDisplay implements DisplayGameModule {
   }
 
   private drawCountdown(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
-    const remaining = Math.max(0, this.phaseDeadline - now);
+    const remaining = this.phases.remaining(now);
     ctx.fillStyle = "rgba(255,255,255,0.75)";
     ctx.font = `600 ${Math.round(20 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.9);

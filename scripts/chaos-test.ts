@@ -9,7 +9,17 @@
  * cycles using real session tokens, and malformed frames. Run with `npm run chaos-test`.
  */
 import { createServer } from "node:http";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { WebSocket } from "ws";
+// This run creates six throwaway `chaos-device-*` players, which used to land in the real
+// data/players.json on every CI run. Point the stores at a temp dir instead. ESM hoists
+// the imports above this line, but that's fine: playerStore/roomSnapshot resolve their
+// data dir per call, not at module load, so this just has to beat the first actual read
+// or write — which can't happen until a client connects further down.
+process.env.PARTY_ARCADE_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "party-arcade-chaos-"));
+
 import { attachWebSocketServer } from "../server/ws-server";
 import { PROTOCOL_VERSION, APP_WS_PATH } from "../src/shared/protocol/constants";
 import type { ClientToServerMessage, ServerToClientMessage } from "../src/shared/protocol/messages";

@@ -4,7 +4,7 @@ import { sfx } from "./sfx";
 import { flashWave } from "./components/waveFlash";
 import { requestWakeLock, releaseWakeLock, reacquireWakeLockOnVisible } from "./input/wakeLock";
 import { PROTOCOL_VERSION } from "@shared/protocol/constants";
-import type { ClientToServerMessage, ServerToClientMessage } from "@shared/protocol/messages";
+import type { ClientToServerMessage, ServerToClientMessage, StoredProfileSnapshot } from "@shared/protocol/messages";
 import type { ArcadeSocket } from "@shared/ws-client";
 import type { ControllerGameModule } from "@shared/types/game";
 import type { GameId, GameMeta, PlayerInfo, RoomPhase } from "@shared/types/room";
@@ -40,6 +40,34 @@ interface StoredSession {
   sessionToken: string;
   name: string;
   color: string;
+}
+
+/**
+ * This phone's own copy of its Career profile — the durable one.
+ *
+ * The server's store lives on a filesystem the free hosting tier throws away whenever the
+ * instance spins down, so it cannot be the system of record: every cold start used to wipe
+ * everyone's stats, achievements and the whole Hall of Fame. Keeping a copy here and
+ * offering it back on join means the server's store heals itself as people reconnect,
+ * without standing up a database for a party game.
+ */
+const PROFILE_KEY = "arcade:profile";
+
+function loadStoredProfile(): StoredProfileSnapshot | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    return raw ? (JSON.parse(raw) as StoredProfileSnapshot) : null;
+  } catch {
+    return null; // storage unavailable, or a corrupt entry — just don't offer one
+  }
+}
+
+function storeProfile(profile: StoredProfileSnapshot): void {
+  try {
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+  } catch {
+    // Non-fatal: this session still works, it just won't help restore anything later.
+  }
 }
 
 const CALIBRATE_INSTRUCTIONS: Record<GameId, string> = {
@@ -224,13 +252,27 @@ export class ControllerRouter {
       error,
       onJoin: (name) => {
         this.name = name;
-        this.send({ type: "player:join", roomCode: this.roomCode, name, protocolVersion: PROTOCOL_VERSION, deviceId: this.deviceId });
+        this.send({
+          type: "player:join",
+          roomCode: this.roomCode,
+          name,
+          protocolVersion: PROTOCOL_VERSION,
+          deviceId: this.deviceId,
+          storedProfile: loadStoredProfile() ?? undefined,
+        });
       },
     });
   }
 
   private handleMessage(msg: ServerToClientMessage): void {
     switch (msg.type) {
+      case "player:profile_sync":
+        // Silent bookkeeping — deliberately no re-render. This phone is the durable copy
+        // of its own Career: the server's store lives on a filesystem that's thrown away
+        // on every cold start, so whatever we save here is what restores it next time.
+        storeProfile(msg.profile);
+        return;
+
       case "player:joined":
         this.playerId = msg.playerId;
         this.sessionToken = msg.sessionToken;
@@ -376,7 +418,14 @@ export class ControllerRouter {
         return;
 
       case "game:private_message":
-        this.activeModule?.onServerMessage(msg);
+        // The phone's mirror of the Display's GameLoop guard: a throw inside one game's
+        // module must not take down the controller mid-party, on the device that's by far
+        // the hardest to debug. Logged, not swallowed silently.
+        try {
+          this.activeModule?.onServerMessage(msg);
+        } catch (err) {
+          console.error("[controller] game module threw handling a private message:", err);
+        }
         return;
 
       case "player:profile_result":

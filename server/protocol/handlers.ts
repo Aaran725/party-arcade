@@ -14,7 +14,7 @@ import { getScenario } from "../ai/generateScenario";
 import { textToSpeech } from "../ai/textToSpeech";
 import { createAvatarSession } from "../ai/simliSession";
 import { getWildcard } from "../ai/generateWildcard";
-import { ensureProfile, getProfile, recordGameResult, getHallOfFame } from "../storage/playerStore";
+import { ensureProfile, getProfile, recordGameResult, getHallOfFame, restoreProfile } from "../storage/playerStore";
 import { saveSnapshot, loadSnapshot } from "../rooms/roomSnapshot";
 
 export interface ConnectionState {
@@ -178,6 +178,12 @@ export function handleMessage(
         deviceId: msg.deviceId,
       });
       ensureProfile(msg.deviceId, name); // touches lastSeen/name even if this device never finishes a game this session
+      // If this phone brought its own copy, fold it in — that's how a Career survives the
+      // container's filesystem being thrown away on a cold start. The merge is monotonic,
+      // so an out-of-date phone can only fill gaps, never undo anything.
+      const profile = msg.storedProfile
+        ? restoreProfile({ deviceId: msg.deviceId, name, ...msg.storedProfile })
+        : getProfile(msg.deviceId);
       saveSnapshot(room);
 
       state.role = "controller";
@@ -198,6 +204,22 @@ export function handleMessage(
         phase: room.phase,
         currentGame: room.currentGame,
       });
+
+      if (profile) {
+        // Echo the merged profile back so the phone's own copy converges with the server's
+        // — otherwise the two would drift apart the moment either side learned something new.
+        sendTo(socket, {
+          type: "player:profile_sync",
+          profile: {
+            gamesPlayed: profile.gamesPlayed,
+            wins: profile.wins,
+            playCounts: profile.playCounts,
+            winsByGame: profile.winsByGame,
+            achievements: profile.achievements,
+            lastSeen: profile.lastSeen,
+          },
+        });
+      }
 
       sendToHost(room, { type: "room:player_joined", player: toPlayerInfo(playerId, room.players.get(playerId)!) });
       broadcastToControllers(room, { type: "room:player_joined", player: toPlayerInfo(playerId, room.players.get(playerId)!) }, playerId);
@@ -528,6 +550,23 @@ export function handleMessage(
             // controller-only unicast) — the Party Recap Reel needs to know what unlocked
             // this session to show it at the end.
             sendToHost(room, { type: "room:achievement_unlocked", playerId, achievementIds: newlyUnlocked });
+          }
+          // Push the updated profile down after every game, not just on join. Syncing only
+          // at join would mean a whole night's progress lived solely in a store that a
+          // cold start can erase before the phone ever reconnects to re-save it.
+          const updated = getProfile(player.deviceId);
+          if (updated) {
+            sendTo(player.socket, {
+              type: "player:profile_sync",
+              profile: {
+                gamesPlayed: updated.gamesPlayed,
+                wins: updated.wins,
+                playCounts: updated.playCounts,
+                winsByGame: updated.winsByGame,
+                achievements: updated.achievements,
+                lastSeen: updated.lastSeen,
+              },
+            });
           }
         }
       }

@@ -92,6 +92,23 @@ export interface PlayerJoinMsg {
   protocolVersion: number;
   /** Persistent per-device id (localStorage, not a real account) — links this join to a Career profile across any room/server-restart. */
   deviceId: string;
+  /**
+   * This phone's own copy of its Career profile, offered so the server can heal a store it
+   * lost to a restart (the hosting tier throws the filesystem away on every cold start).
+   * Merged monotonically server-side — max on counters, union on achievements — so it can
+   * only ever fill in gaps, never roll back a newer record. Omitted on a device's first
+   * ever join, when there's nothing to restore.
+   */
+  storedProfile?: StoredProfileSnapshot;
+}
+/** The subset of a Career profile a phone keeps for itself and offers back on join. */
+export interface StoredProfileSnapshot {
+  gamesPlayed: number;
+  wins: number;
+  playCounts: Partial<Record<GameId, number>>;
+  winsByGame: Partial<Record<GameId, number>>;
+  achievements: string[];
+  lastSeen: number;
 }
 export interface PlayerRequestProfileMsg {
   type: "player:request_profile";
@@ -252,6 +269,15 @@ export interface SpectatorPartyRecapMsg {
 export interface SpectatorStandingsUpdateMsg {
   type: "spectator:standings_update";
   standings: Record<string, number>;
+}
+/**
+ * The merged profile echoed back after a join, for the phone to save as its own copy.
+ * Deliberately separate from PlayerProfileResultMsg, which the controller treats as "open
+ * the Career screen now" — this one is silent bookkeeping, not a navigation event.
+ */
+export interface PlayerProfileSyncMsg {
+  type: "player:profile_sync";
+  profile: StoredProfileSnapshot;
 }
 export interface PlayerProfileResultMsg {
   type: "player:profile_result";
@@ -470,6 +496,7 @@ export type ServerToClientMessage =
   | PlayerJoinedMsg
   | PlayerJoinRejectedMsg
   | PlayerProfileResultMsg
+  | PlayerProfileSyncMsg
   | SpectatorJoinedMsg
   | SpectatorJoinRejectedMsg
   | SpectatorPartyRecapMsg

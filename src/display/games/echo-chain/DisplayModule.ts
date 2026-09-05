@@ -3,6 +3,8 @@ import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { drawWordEntries } from "@shared/word-bank";
 import { createStageCanvas, uiScale, wrapText, roundRect, drawSpecularEdge } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -51,9 +53,23 @@ export class EchoChainDisplay implements DisplayGameModule {
   private winnerId: string | null = null;
   private lastOutcome: Outcome | null = null;
 
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
-  private lastCountdownTickAt = 0;
+  private readonly phases = new PhaseMachine<Phase>(
+    "rules",
+    {
+      rules: { onExpire: () => this.beginChain() },
+      // countdownTicks replaces the hand-rolled "last 3 seconds, once per second" bookkeeping.
+      // The turn also ends early when audio arrives (see onInput) — that's a transition, not endEarlyWhen.
+      turn: {
+        countdownTicks: true,
+        onExpire: () => this.resolveOutcome({ type: "eliminated", playerId: this.currentPlayerId, reason: "silence" }),
+      },
+      transcribing: {
+        onExpire: () => this.resolveOutcome({ type: "eliminated", playerId: this.currentPlayerId, reason: "silence" }),
+      },
+      reveal: { onExpire: () => this.startTurn() },
+    },
+    { onCountdownTick: () => sfx.countdownTick(true) },
+  );
 
   private particles: Particle[] = [];
 
@@ -70,12 +86,11 @@ export class EchoChainDisplay implements DisplayGameModule {
     this.turnCount = 0;
     this.winnerId = null;
     this.lastOutcome = null;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private remainingPlayers(): PlayerInfo[] {
@@ -125,9 +140,7 @@ export class EchoChainDisplay implements DisplayGameModule {
       else if (p.id === nextId) ctx.sendPrivate(p.id, { role: "active" });
       else ctx.sendPrivate(p.id, { role: "waiting", activeName: this.nameFor(nextId) });
     }
-    this.phase = "turn";
-    this.phaseDeadline = performance.now() + TURN_MS;
-    this.lastCountdownTickAt = 0;
+    this.phases.setPhase("turn", TURN_MS);
   }
 
   private resolveOutcome(outcome: Outcome): void {
@@ -150,8 +163,7 @@ export class EchoChainDisplay implements DisplayGameModule {
       sfx.hit(1);
     }
 
-    this.phase = "reveal";
-    this.phaseDeadline = performance.now() + REVEAL_MS;
+    this.phases.setPhase("reveal", REVEAL_MS);
   }
 
   private finishGame(): void {
@@ -166,7 +178,10 @@ export class EchoChainDisplay implements DisplayGameModule {
     const colors = this.connectedPlayers().map((p) => p.color);
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : [THEME.accent], 70));
     sfx.gameOverFanfare();
-    setTimeout(() => ctx.onGameOver(this.getScores()), 900);
+    // finish() halts phase dispatch and is idempotent. Previously this left `phase`/
+    // `phaseDeadline` untouched, so the already-expired phase re-ran startTurn() → this
+    // method every frame for the full 900ms: dozens of confetti bursts and fanfares stacked up.
+    this.phases.finish(900, () => ctx.onGameOver(this.getScores()));
   }
 
   getScores(): Record<string, number> {
@@ -176,7 +191,7 @@ export class EchoChainDisplay implements DisplayGameModule {
   }
 
   onTranscriptionResult(playerId: string, text: string | null): void {
-    if (this.phase !== "transcribing" || playerId !== this.currentPlayerId) return;
+    if (this.phases.phase !== "transcribing" || playerId !== this.currentPlayerId) return;
     const normalized = (text ?? "").trim();
     if (!normalized) {
       this.resolveOutcome({ type: "eliminated", playerId, reason: "silence" });
@@ -193,16 +208,15 @@ export class EchoChainDisplay implements DisplayGameModule {
 
   onInput(playerId: string, msg: InputMessage): void {
     if (msg.type !== "input:audio") return;
-    if (this.phase !== "turn" || playerId !== this.currentPlayerId) return;
-    this.phase = "transcribing";
-    this.phaseDeadline = performance.now() + TRANSCRIBING_TIMEOUT_MS;
+    if (this.phases.phase !== "turn" || playerId !== this.currentPlayerId) return;
+    this.phases.setPhase("transcribing", TRANSCRIBING_TIMEOUT_MS);
     this.gameCtx!.requestTranscription(playerId, msg.audioData);
   }
 
   onPlayerLeave(playerId: string): void {
     this.connectedIds.delete(playerId);
     this.eliminatedIds.add(playerId);
-    if (playerId === this.currentPlayerId && (this.phase === "turn" || this.phase === "transcribing")) {
+    if (playerId === this.currentPlayerId && (this.phases.phase === "turn" || this.phases.phase === "transcribing")) {
       this.resolveOutcome({ type: "eliminated", playerId, reason: "silence" });
     }
   }
@@ -211,26 +225,7 @@ export class EchoChainDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.beginChain();
-        break;
-      case "turn": {
-        const remaining = this.phaseDeadline - now;
-        if (remaining <= 3000 && now - this.lastCountdownTickAt >= 1000) {
-          this.lastCountdownTickAt = now;
-          sfx.countdownTick(true);
-        }
-        if (remaining <= 0) this.resolveOutcome({ type: "eliminated", playerId: this.currentPlayerId, reason: "silence" });
-        break;
-      }
-      case "transcribing":
-        if (now >= this.phaseDeadline) this.resolveOutcome({ type: "eliminated", playerId: this.currentPlayerId, reason: "silence" });
-        break;
-      case "reveal":
-        if (now >= this.phaseDeadline) this.startTurn();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -247,7 +242,7 @@ export class EchoChainDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🗣️ Echo Chain", w / 2, h * 0.25);
@@ -266,22 +261,22 @@ export class EchoChainDisplay implements DisplayGameModule {
     ctx.font = `700 ${Math.round(34 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(this.chainWords[this.chainWords.length - 1] ?? "", w / 2, h * 0.22);
 
-    if (this.phase === "turn") {
+    if (this.phases.phase === "turn") {
       this.drawGlassPanel(ctx, w * 0.08, h * 0.09, w * 0.84, h * 0.4);
       ctx.fillStyle = THEME.accent;
       ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`${this.nameFor(this.currentPlayerId)}'s turn`, w / 2, h * 0.36);
-      const remaining = Math.max(0, this.phaseDeadline - now);
+      const remaining = this.phases.remaining(now);
       ctx.fillStyle = "rgba(255,255,255,0.7)";
       ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.44);
-    } else if (this.phase === "transcribing") {
+    } else if (this.phases.phase === "transcribing") {
       this.drawGlassPanel(ctx, w * 0.08, h * 0.09, w * 0.84, h * 0.34);
       ctx.fillStyle = "rgba(255,255,255,0.85)";
       ctx.font = `700 ${Math.round(22 * uiScale(w, h))}px -apple-system, sans-serif`;
       const dots = ".".repeat((Math.floor(now / 400) % 3) + 1);
       ctx.fillText(`🎧 Listening${dots}`, w / 2, h * 0.4);
-    } else if (this.phase === "reveal" && this.lastOutcome) {
+    } else if (this.phases.phase === "reveal" && this.lastOutcome) {
       this.drawGlassPanel(ctx, w * 0.08, h * 0.09, w * 0.84, h * 0.32);
       if (this.lastOutcome.type === "success") {
         ctx.fillStyle = "#30D158";

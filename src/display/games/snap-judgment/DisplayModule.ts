@@ -2,6 +2,8 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -56,12 +58,25 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
   private connectedIds = new Set<string>();
 
   private roundIndex = 0;
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
   private photos = new Map<string, string>(); // playerId -> data URL, this round
   private photoImages = new Map<string, HTMLImageElement>();
   private votes = new Map<string, string>(); // voterId -> targetId
   private lastRoundResults: RankedResult[] = [];
+
+  private readonly phases = new PhaseMachine<Phase>("rules", {
+    rules: { onExpire: () => this.startRound() },
+    // No endEarlyWhen on capture on purpose: a photo can be retaken, so "everyone has one"
+    // isn't final — cutting the phase short would lock in a shot someone meant to redo.
+    capture: { onExpire: () => this.beginVoting() },
+    voting: {
+      onExpire: () => this.resolveVotes(),
+      endEarlyWhen: () => {
+        const players = this.connectedPlayers();
+        return players.length > 0 && players.every((p) => this.votes.has(p.id));
+      },
+    },
+    result: { onExpire: () => this.startRound() },
+  });
 
   private particles: Particle[] = [];
 
@@ -72,12 +87,11 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     this.connectedIds = new Set(ctx.players.map((p) => p.id));
     for (const p of ctx.players) this.scores.set(p.id, 0);
     this.roundIndex = 0;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private nameFor(id: string): string {
@@ -95,8 +109,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     this.votes.clear();
     const prompt = PROMPTS[Math.min(this.roundIndex, PROMPTS.length - 1)];
     for (const p of this.connectedPlayers()) ctx.sendPrivate(p.id, { prompt });
-    this.phase = "capture";
-    this.phaseDeadline = performance.now() + CAPTURE_MS;
+    this.phases.setPhase("capture", CAPTURE_MS);
     sfx.roundStart();
   }
 
@@ -113,8 +126,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
       return;
     }
     for (const p of this.connectedPlayers()) ctx.sendPrivate(p.id, { phase: "vote", photos: roster });
-    this.phase = "voting";
-    this.phaseDeadline = performance.now() + VOTE_MS;
+    this.phases.setPhase("voting", VOTE_MS);
   }
 
   private resolveVotes(): void {
@@ -143,8 +155,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
       }
     }
 
-    this.phase = "result";
-    this.phaseDeadline = performance.now() + RESULT_MS;
+    this.phases.setPhase("result", RESULT_MS);
     this.roundIndex += 1;
   }
 
@@ -155,7 +166,10 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     const colors = this.connectedPlayers().map((p) => p.color);
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : ["#64D2FF"], 70));
     sfx.gameOverFanfare();
-    setTimeout(() => ctx.onGameOver(this.getScores()), 900);
+    // finish() halts phase dispatch and is idempotent. Previously this left `phase`/
+    // `phaseDeadline` untouched, so the already-expired phase re-ran startRound() → this
+    // method every frame for the full 900ms: ~54 confetti bursts and fanfares stacked up.
+    this.phases.finish(900, () => ctx.onGameOver(this.getScores()));
   }
 
   getScores(): Record<string, number> {
@@ -166,7 +180,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
 
   onInput(playerId: string, msg: InputMessage): void {
     if (msg.type === "input:photo") {
-      if (this.phase !== "capture" || !this.connectedIds.has(playerId)) return;
+      if (this.phases.phase !== "capture" || !this.connectedIds.has(playerId)) return;
       this.photos.set(playerId, msg.imageData);
       const img = new Image();
       img.src = msg.imageData;
@@ -174,7 +188,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
       return;
     }
     if (msg.type === "input:button" && msg.pressed) {
-      if (this.phase !== "voting" || !this.connectedIds.has(playerId)) return;
+      if (this.phases.phase !== "voting" || !this.connectedIds.has(playerId)) return;
       if (playerId === msg.buttonId) return; // defensive — client already excludes self
       if (!this.photos.has(msg.buttonId)) return;
       this.votes.set(playerId, msg.buttonId);
@@ -192,20 +206,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-      case "capture":
-        if (now >= this.phaseDeadline) this.beginVoting();
-        break;
-      case "voting":
-        if (now >= this.phaseDeadline) this.resolveVotes();
-        break;
-      case "result":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -222,7 +223,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("📸 Snap Judgment", w / 2, h * 0.22);
@@ -236,12 +237,12 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
     ctx.font = `600 ${Math.round(16 * uiScale(w, h))}px -apple-system, sans-serif`;
     ctx.fillText(`Round ${Math.min(this.roundIndex + 1, ROUND_COUNT)} / ${ROUND_COUNT}`, w / 2, 28);
 
-    if (this.phase === "capture") {
+    if (this.phases.phase === "capture") {
       const prompt = PROMPTS[Math.min(this.roundIndex, PROMPTS.length - 1)];
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.font = `700 ${Math.round(26 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, prompt, w / 2, h * 0.16, w * 0.7, 32);
-      const remaining = Math.max(0, this.phaseDeadline - now);
+      const remaining = this.phases.remaining(now);
       ctx.font = `600 ${Math.round(18 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillStyle = "rgba(255,255,255,0.65)";
       ctx.fillText(`${Math.ceil(remaining / 1000)}s`, w / 2, h * 0.28);
@@ -258,7 +259,7 @@ export class SnapJudgmentDisplay implements DisplayGameModule {
       return;
     }
 
-    if (this.phase === "voting") {
+    if (this.phases.phase === "voting") {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = `700 ${Math.round(22 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("Vote on your phone", w / 2, h * 0.1);

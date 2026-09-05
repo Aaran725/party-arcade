@@ -43,7 +43,16 @@ export class ArcadeSocket {
       // Deliberately outside the parse try/catch: a bug in a handler must surface in the
       // console, not get silently swallowed alongside malformed-JSON handling — a handler
       // throwing here previously meant the UI just hung with no trace at all.
-      this.messageHandlers.forEach((h) => h(msg));
+      // Guarded per-handler rather than around the whole loop, which keeps that "surface
+      // it loudly" intent while stopping one throwing handler from starving every handler
+      // registered after it of the same message.
+      for (const handler of this.messageHandlers) {
+        try {
+          handler(msg);
+        } catch (err) {
+          console.error("[ws-client] message handler threw:", err);
+        }
+      }
     });
 
     ws.addEventListener("close", () => {

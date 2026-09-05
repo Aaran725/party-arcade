@@ -1,9 +1,10 @@
-import type { GameId } from "./types/room";
+import { ALL_GAME_IDS, type GameId } from "./types/room";
 
-// Bump this when a new game is added to the registry — "played every game" can't be
-// computed from in here (this file has no access to server/games/registry.ts), so it's a
-// small manual constant instead, same trade-off as the Groq model-id hedges elsewhere.
-const TOTAL_GAME_COUNT = 16;
+// Derived, never hand-maintained. This was a manual constant on the theory that the count
+// was only knowable from server/games/registry.ts, which this file can't import — but the
+// roster is already enumerated in shared types, so it was always derivable. The constant
+// had drifted to 16 against a 17-game roster, unlocking "Well-Rounded" a game early.
+const TOTAL_GAME_COUNT = ALL_GAME_IDS.length;
 
 export interface PlayerStats {
   gamesPlayed: number;

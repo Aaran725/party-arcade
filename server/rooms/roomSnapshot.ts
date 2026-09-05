@@ -3,8 +3,14 @@ import path from "node:path";
 import type { GameId, RoomPhase } from "@shared/types/room";
 import type { Room } from "./Room";
 
-const DATA_DIR = path.resolve(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "rooms.json");
+// Same PARTY_ARCADE_DATA_DIR seam as playerStore.ts — resolved per call so tests and the
+// chaos runner don't write into the real data/rooms.json.
+function dataDir(): string {
+  return process.env.PARTY_ARCADE_DATA_DIR ?? path.resolve(process.cwd(), "data");
+}
+function dataFile(): string {
+  return path.join(dataDir(), "rooms.json");
+}
 // A restart happening minutes into a party is the real case this exists for; a snapshot
 // older than this is almost certainly an abandoned room from a party that's long over, not
 // one worth resurrecting for a phone that finally wanders back into range.
@@ -35,7 +41,7 @@ let cache: Record<string, RoomSnapshot> | null = null;
 function load(): Record<string, RoomSnapshot> {
   if (cache) return cache;
   try {
-    cache = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+    cache = JSON.parse(fs.readFileSync(dataFile(), "utf-8"));
   } catch {
     cache = {};
   }
@@ -43,8 +49,8 @@ function load(): Record<string, RoomSnapshot> {
 }
 
 function persist(): void {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(cache, null, 2));
+  fs.mkdirSync(dataDir(), { recursive: true });
+  fs.writeFileSync(dataFile(), JSON.stringify(cache, null, 2));
 }
 
 /** Called at the handful of room-mutation points that matter (create, player join/leave, phase change, game select/over) — mirrors playerStore.ts's own "rewrite whole on every change" trade-off. */

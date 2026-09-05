@@ -2,6 +2,8 @@ import type { DisplayGameContext, DisplayGameModule } from "@shared/types/game";
 import type { InputMessage } from "@shared/protocol/messages";
 import type { PlayerInfo } from "@shared/types/room";
 import { createStageCanvas, roundRect, drawSpecularEdge, uiScale, wrapText } from "../../game-runtime/canvas";
+import { PhaseMachine } from "../../game-runtime/roundEngine";
+import { connectedPlayers } from "../../game-runtime/players";
 import { drawAmbientBackground, THEMES } from "../../game-runtime/theme";
 import { type Particle, drawParticles, spawnBurst, spawnConfetti, stepParticles } from "../../game-runtime/particles";
 import { sfx } from "@shared/audio";
@@ -50,13 +52,18 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
   private connectedIds = new Set<string>();
 
   private roundIndex = 0;
-  private phase: Phase = "rules";
-  private phaseDeadline = 0;
   private currentLevel = new Map<string, number>();
   private peakThisRound = new Map<string, number>();
   private lastRoundResults: RankedResult[] = [];
   private allTimePeak = 0;
   private reactionGate = new ReactionGate();
+
+  private readonly phases = new PhaseMachine<Phase>("rules", {
+    rules: { onExpire: () => this.startRound() },
+    ready: { onExpire: () => this.beginActive() },
+    active: { onExpire: () => this.resolveRound() },
+    result: { onExpire: () => this.startRound() },
+  });
 
   private particles: Particle[] = [];
 
@@ -67,12 +74,11 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
     this.connectedIds = new Set(ctx.players.map((p) => p.id));
     for (const p of ctx.players) this.scores.set(p.id, 0);
     this.roundIndex = 0;
-    this.phase = "rules";
-    this.phaseDeadline = performance.now() + RULES_MS;
+    this.phases.setPhase("rules", RULES_MS);
   }
 
   private connectedPlayers(): PlayerInfo[] {
-    return this.gameCtx!.players.filter((p) => this.connectedIds.has(p.id));
+    return connectedPlayers(this.gameCtx!.players, this.connectedIds);
   }
 
   private nameFor(id: string): string {
@@ -90,13 +96,11 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
       this.currentLevel.set(p.id, 0);
       this.peakThisRound.set(p.id, 0);
     }
-    this.phase = "ready";
-    this.phaseDeadline = performance.now() + READY_MS;
+    this.phases.setPhase("ready", READY_MS);
   }
 
   private beginActive(): void {
-    this.phase = "active";
-    this.phaseDeadline = performance.now() + ACTIVE_MS;
+    this.phases.setPhase("active", ACTIVE_MS);
     sfx.roundStart();
   }
 
@@ -127,8 +131,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
       this.reactionGate.fire(ctx.hostSpeak, pickRecordLine(this.nameFor(winnerId)));
     }
 
-    this.phase = "result";
-    this.phaseDeadline = performance.now() + RESULT_MS;
+    this.phases.setPhase("result", RESULT_MS);
     this.roundIndex += 1;
   }
 
@@ -139,7 +142,10 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
     const colors = this.connectedPlayers().map((p) => p.color);
     this.particles.push(...spawnConfetti(canvas.width / dpr, canvas.height / dpr, colors.length ? colors : ["#FF453A"], 70));
     sfx.gameOverFanfare();
-    setTimeout(() => ctx.onGameOver(this.getScores()), 900);
+    // finish() halts phase dispatch and is idempotent. Previously this left `phase`/
+    // `phaseDeadline` untouched, so the already-expired phase re-ran startRound() → this
+    // method every frame for the full 900ms: ~54 confetti bursts and fanfares stacked up.
+    this.phases.finish(900, () => ctx.onGameOver(this.getScores()));
   }
 
   getScores(): Record<string, number> {
@@ -150,7 +156,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
 
   onInput(playerId: string, msg: InputMessage): void {
     if (msg.type !== "input:mic_level") return;
-    if (this.phase !== "active" || !this.connectedIds.has(playerId)) return;
+    if (this.phases.phase !== "active" || !this.connectedIds.has(playerId)) return;
     this.currentLevel.set(playerId, msg.level);
     this.peakThisRound.set(playerId, Math.max(this.peakThisRound.get(playerId) ?? 0, msg.level));
   }
@@ -165,20 +171,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
     if (!this.stage) return;
     const now = performance.now();
 
-    switch (this.phase) {
-      case "rules":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-      case "ready":
-        if (now >= this.phaseDeadline) this.beginActive();
-        break;
-      case "active":
-        if (now >= this.phaseDeadline) this.resolveRound();
-        break;
-      case "result":
-        if (now >= this.phaseDeadline) this.startRound();
-        break;
-    }
+    this.phases.tick(now, dt);
 
     this.particles = stepParticles(this.particles, dt, now);
     this.draw(now);
@@ -195,7 +188,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
     drawAmbientBackground(ctx, w, h, THEME, now);
     ctx.textAlign = "center";
 
-    if (this.phase === "rules") {
+    if (this.phases.phase === "rules") {
       ctx.fillStyle = "rgba(255,255,255,0.95)";
       ctx.font = `700 ${Math.round(30 * uiScale(w, h))}px -apple-system, sans-serif`;
       ctx.fillText("🎤 Scream Royale", w / 2, h * 0.22);
@@ -211,7 +204,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
 
     const prompt = PROMPTS[Math.min(this.roundIndex, PROMPTS.length - 1)];
 
-    if (this.phase === "ready") {
+    if (this.phases.phase === "ready") {
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.font = `700 ${Math.round(28 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, prompt, w / 2, h * 0.42, w * 0.7, 34);
@@ -221,7 +214,7 @@ export class ScreamRoyaleDisplay implements DisplayGameModule {
       return;
     }
 
-    if (this.phase === "active") {
+    if (this.phases.phase === "active") {
       ctx.fillStyle = "rgba(255,255,255,0.9)";
       ctx.font = `700 ${Math.round(24 * uiScale(w, h))}px -apple-system, sans-serif`;
       wrapText(ctx, prompt, w / 2, h * 0.14, w * 0.7, 30);

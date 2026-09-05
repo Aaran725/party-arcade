@@ -86,7 +86,14 @@ export class GameStage {
   }
 
   onInput(playerId: string, msg: InputMessage): void {
-    this.activeModule?.onInput(playerId, msg);
+    // Guarded like the GameLoop's tick (game-runtime/loop.ts): onInput is where several
+    // games mutate scores and drive phase transitions, so one malformed input must not
+    // escape into the socket handler and strand the whole room mid-game.
+    try {
+      this.activeModule?.onInput(playerId, msg);
+    } catch (err) {
+      console.error("[GameStage] onInput error:", err);
+    }
   }
 
   onRatingsResult(ratings: { playerId: string; score: number | null; comment: string | null }[]): void {
