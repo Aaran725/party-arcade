@@ -7,7 +7,7 @@ import { colorForIndex } from "@shared/colors";
 import { GAME_REGISTRY, getGameMeta } from "../games/registry";
 import type { RoomManager } from "../rooms/RoomManager";
 import type { Room } from "../rooms/Room";
-import { broadcastRoom, broadcastToControllers, sendTo, sendToHost } from "./broadcast";
+import { broadcastRoom, broadcastToControllers, broadcastToSpectators, sendTo, sendToHost } from "./broadcast";
 import { rateDrawing } from "../ai/rateDrawing";
 import { transcribeAudio } from "../ai/transcribeAudio";
 import { getScenario } from "../ai/generateScenario";
@@ -17,7 +17,7 @@ import { getWildcard } from "../ai/generateWildcard";
 import { ensureProfile, getProfile, recordGameResult } from "../storage/playerStore";
 
 export interface ConnectionState {
-  role: "unassigned" | "host" | "controller";
+  role: "unassigned" | "host" | "controller" | "spectator";
   roomCode?: string;
   playerId?: string;
 }
@@ -175,6 +175,7 @@ export function handleMessage(
 
       sendToHost(room, { type: "room:player_joined", player: toPlayerInfo(playerId, room.players.get(playerId)!) });
       broadcastToControllers(room, { type: "room:player_joined", player: toPlayerInfo(playerId, room.players.get(playerId)!) }, playerId);
+      broadcastToSpectators(room, { type: "room:player_joined", player: toPlayerInfo(playerId, room.players.get(playerId)!) });
       return;
     }
 
@@ -229,6 +230,7 @@ export function handleMessage(
 
       sendToHost(room, { type: "room:player_reconnected", playerId: player.id });
       broadcastToControllers(room, { type: "room:player_reconnected", playerId: player.id }, player.id);
+      broadcastToSpectators(room, { type: "room:player_reconnected", playerId: player.id });
       return;
     }
 
@@ -236,6 +238,7 @@ export function handleMessage(
       const room = requireHostRoom(roomManager, state);
       if (!room) return;
       broadcastToControllers(room, { type: "game:score_update", playerId: msg.playerId, score: msg.score });
+      broadcastToSpectators(room, { type: "game:score_update", playerId: msg.playerId, score: msg.score });
       return;
     }
 
@@ -316,6 +319,26 @@ export function handleMessage(
       return;
     }
 
+    case "display:party_recap": {
+      const room = requireHostRoom(roomManager, state);
+      if (!room) return;
+      broadcastToSpectators(room, {
+        type: "spectator:party_recap",
+        players: msg.players,
+        standings: msg.standings,
+        history: msg.history,
+        achievements: msg.achievements,
+      });
+      return;
+    }
+
+    case "display:standings_update": {
+      const room = requireHostRoom(roomManager, state);
+      if (!room) return;
+      broadcastToSpectators(room, { type: "spectator:standings_update", standings: msg.standings });
+      return;
+    }
+
     case "display:trigger_wave": {
       const room = requireHostRoom(roomManager, state);
       if (!room) return;
@@ -339,6 +362,7 @@ export function handleMessage(
       target.socket.close();
       sendToHost(room, { type: "room:player_left", playerId: msg.playerId });
       broadcastToControllers(room, { type: "room:player_left", playerId: msg.playerId }, msg.playerId);
+      broadcastToSpectators(room, { type: "room:player_left", playerId: msg.playerId });
       return;
     }
 
@@ -364,6 +388,7 @@ export function handleMessage(
       room.currentGame = msg.gameId;
       room.phase = meta.requiresMotion ? "calibrating" : "selecting";
       broadcastRoom(room, { type: "game:selected", gameId: msg.gameId, meta });
+      broadcastToSpectators(room, { type: "game:selected", gameId: msg.gameId, meta });
       if (meta.requiresMotion) {
         broadcastToControllers(room, { type: "game:calibrate_request" });
       }
@@ -405,6 +430,7 @@ export function handleMessage(
       room.phase = "game_over";
       room.lastScores = msg.scores;
       broadcastRoom(room, { type: "game:over", scores: msg.scores });
+      broadcastToSpectators(room, { type: "game:over", scores: msg.scores });
 
       // Career tracking — best-effort: a game with no currentGame set (shouldn't happen)
       // or a player who's already disconnected just doesn't get recorded, never blocks
@@ -424,6 +450,27 @@ export function handleMessage(
           }
         }
       }
+      return;
+    }
+
+    case "spectator:join": {
+      const room = roomManager.getRoom(msg.roomCode);
+      if (!room) {
+        sendTo(socket, { type: "spectator:join_rejected", reason: "room_not_found" });
+        return;
+      }
+      room.spectatorSockets.add(socket);
+      state.role = "spectator";
+      state.roomCode = room.code;
+      sendTo(socket, {
+        type: "spectator:joined",
+        roomCode: room.code,
+        players: roomPlayerList(room),
+        phase: room.phase,
+        currentGame: room.currentGame,
+        games: GAME_REGISTRY,
+        standings: room.lastScores ?? {},
+      });
       return;
     }
 
@@ -470,6 +517,7 @@ export function handleMessage(
       if (now - last < REACTION_MIN_INTERVAL_MS) return;
       lastReactionAt.set(socket, now);
       sendToHost(found.room, { type: "game:reaction", playerId: found.playerId, emoji: msg.emoji });
+      broadcastToSpectators(found.room, { type: "game:reaction", playerId: found.playerId, emoji: msg.emoji });
       return;
     }
 

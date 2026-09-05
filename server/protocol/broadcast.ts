@@ -21,3 +21,8 @@ export function broadcastRoom(room: Room, msg: ServerToClientMessage): void {
   sendToHost(room, msg);
   broadcastToControllers(room, msg);
 }
+
+/** Not folded into broadcastRoom() — most host/controller traffic (calibration, private per-player payloads) is irrelevant to a watch-only spectator, so this is called explicitly only at the sites that matter (score updates, game selection, reactions, party recap). */
+export function broadcastToSpectators(room: Room, msg: ServerToClientMessage): void {
+  for (const socket of room.spectatorSockets) sendTo(socket, msg);
+}

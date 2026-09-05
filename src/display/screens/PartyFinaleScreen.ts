@@ -10,6 +10,7 @@ import { scoreboard, teamScoreboard } from "./GameOverScreen";
 import type { PartyHistoryEntry } from "../party/PartySession";
 import type { TeamAssignments } from "./PartySetupScreen";
 import { winnerOf, closestMomentEntry } from "../party/superlatives";
+import { renderRecapImageCard } from "../party/recapImage";
 
 const CONFETTI_DURATION_MS = 3000;
 const CONFETTI_COUNT = 180;
@@ -24,6 +25,8 @@ export function renderPartyFinaleScreen(
     /** Team Mode, when on — omitted for a solo/free-for-all party. */
     teams?: TeamAssignments;
     teamStandings?: Record<string, number>;
+    /** Only needed for the shareable recap image's achievement badges — the on-screen finale itself doesn't show them. */
+    achievements?: { playerId: string; achievementIds: string[] }[];
   },
 ): void {
   const ranked = Object.entries(opts.standings).sort((a, b) => b[1] - a[1]);
@@ -57,6 +60,31 @@ export function renderPartyFinaleScreen(
   const newPartyBtn = el("button", { class: "glass-button accent" }, ["New party"]);
   newPartyBtn.addEventListener("click", opts.onNewParty);
 
+  const shareBtn = el("button", { class: "glass-button" }, ["Share recap"]);
+  shareBtn.addEventListener("click", async () => {
+    shareBtn.setAttribute("disabled", "");
+    shareBtn.textContent = "Generating…";
+    try {
+      const dataUrl = await renderRecapImageCard({
+        players: opts.players,
+        standings: opts.standings,
+        history: opts.history,
+        achievements: opts.achievements ?? [],
+      });
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], "party-recap.png", { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "Party Arcade Recap" }).catch(() => {});
+      } else {
+        const a = el("a", { href: dataUrl, download: "party-recap.png" });
+        a.click();
+      }
+    } finally {
+      shareBtn.removeAttribute("disabled");
+      shareBtn.textContent = "Share recap";
+    }
+  });
+
   const heading: (Node | string)[] = winner
     ? [createAvatarSvg(winner.id, winner.color, { size: "8em" }), el("h1", { class: "title-xl" }, [`${winner.name} wins the party!`])]
     : [el("h1", { class: "title-xl" }, ["Party complete!"])];
@@ -69,7 +97,7 @@ export function renderPartyFinaleScreen(
     ...(closestNode ? [closestNode] : []),
     scoreboard(opts.players, opts.standings),
     ...(opts.teams && opts.teamStandings ? [teamScoreboard(opts.players, opts.teams, opts.teamStandings)] : []),
-    newPartyBtn,
+    el("div", { style: "display:flex;gap:0.6em" }, [shareBtn, newPartyBtn]),
   ]);
 
   root.replaceChildren(panel);

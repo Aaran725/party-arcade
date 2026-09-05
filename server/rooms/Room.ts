@@ -11,6 +11,10 @@ export class Room {
   phase: RoomPhase = "lobby";
   lastScores: Record<string, number> | null = null;
   hostLeaveTimer: NodeJS.Timeout | null = null;
+  // Watch-only sockets — no player slot, no reconnect/leave-timer machinery needed, a
+  // dropped spectator just reopens the link (see server/protocol/handlers.ts's
+  // "spectator:join" and ws-server.ts's close handling).
+  spectatorSockets: Set<WebSocket> = new Set();
 
   constructor(code: string, hostSocket: WebSocket) {
     this.code = code;

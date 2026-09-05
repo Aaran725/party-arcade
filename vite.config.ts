@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, "index.html"),
         play: path.resolve(__dirname, "play.html"),
+        spectate: path.resolve(__dirname, "spectate.html"),
       },
     },
   },

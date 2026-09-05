@@ -64,7 +64,14 @@ async function main() {
       if (!publicUrl && handleCertTrustRoute(req, res)) return;
       vite.middlewares(req, res, async () => {
         const url = req.url ?? "/";
-        const page = url === "/" || url.startsWith("/?") ? "index.html" : url.startsWith("/play.html") ? "play.html" : null;
+        const page =
+          url === "/" || url.startsWith("/?")
+            ? "index.html"
+            : url.startsWith("/play.html")
+              ? "play.html"
+              : url.startsWith("/spectate.html")
+                ? "spectate.html"
+                : null;
         if (!page) {
           res.statusCode = 404;
           res.end("Not found");

@@ -5,7 +5,7 @@ import { APP_WS_PATH } from "@shared/protocol/constants";
 import type { ClientToServerMessage } from "@shared/protocol/messages";
 import { RoomManager } from "./rooms/RoomManager";
 import { type ConnectionState, type ServerInfo, handleMessage } from "./protocol/handlers";
-import { broadcastToControllers, sendToHost } from "./protocol/broadcast";
+import { broadcastToControllers, broadcastToSpectators, sendToHost } from "./protocol/broadcast";
 
 const HEARTBEAT_INTERVAL_MS = 10_000;
 // Generous enough for a full-resolution base64 drawing/photo frame with room to spare —
@@ -105,10 +105,17 @@ export function attachWebSocketServer(httpsServer: HTTPServer | HTTPSServer, lan
         player.connected = false;
         sendToHost(room, { type: "room:player_left", playerId: state.playerId });
         broadcastToControllers(room, { type: "room:player_left", playerId: state.playerId }, state.playerId);
+        broadcastToSpectators(room, { type: "room:player_left", playerId: state.playerId });
 
         player.leaveTimer = setTimeout(() => {
           room.players.delete(state.playerId!);
         }, roomManager.playerGraceMs);
+        return;
+      }
+
+      if (state.role === "spectator" && state.roomCode) {
+        const room = roomManager.getRoom(state.roomCode);
+        room?.spectatorSockets.delete(socket);
       }
     });
   });

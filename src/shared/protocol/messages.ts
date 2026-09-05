@@ -1,5 +1,13 @@
 import type { GameId, GameMeta, PlayerInfo, RoomPhase } from "@shared/types/room";
 
+/** Mirrors the Display-only PartyHistoryEntry (src/display/party/PartySession.ts) — duplicated here rather than imported so the protocol layer never depends on Display-side code. */
+export interface PartyHistoryEntrySnapshot {
+  gameId: GameId;
+  scores: Record<string, number>;
+  highlightImage?: string;
+  highlightCaption?: string;
+}
+
 // ---------- Display -> Server ----------
 export interface DisplayCreateMsg {
   type: "display:create";
@@ -83,6 +91,24 @@ export interface PlayerJoinMsg {
 }
 export interface PlayerRequestProfileMsg {
   type: "player:request_profile";
+}
+/** A watch-only connection — no name, no color, no player slot. Can join at any point, including mid-game, unlike PlayerJoinMsg. */
+export interface SpectatorJoinMsg {
+  type: "spectator:join";
+  roomCode: string;
+}
+/** Snapshot of a completed party's recap data, forwarded to spectators once the Display has assembled it (see PartyRecapScreen's buildCards) — spectators aren't part of broadcastRoom, so this is the one payload that needs an explicit round-trip through the server. */
+export interface DisplayPartyRecapMsg {
+  type: "display:party_recap";
+  players: PlayerInfo[];
+  standings: Record<string, number>;
+  history: PartyHistoryEntrySnapshot[];
+  achievements: { playerId: string; achievementIds: string[] }[];
+}
+/** Sent whenever the Display's own cumulative party standings change (see Router.ts's endGame()) — relayed to spectators so their live leaderboard stays accurate across multiple games, not just the current one. */
+export interface DisplayStandingsUpdateMsg {
+  type: "display:standings_update";
+  standings: Record<string, number>;
 }
 export interface PlayerReconnectMsg {
   type: "player:reconnect";
@@ -195,6 +221,33 @@ export interface PlayerJoinedMsg {
 export interface PlayerJoinRejectedMsg {
   type: "player:join_rejected";
   reason: "room_not_found" | "room_full" | "name_taken" | "game_in_progress" | "version_mismatch";
+}
+/** Initial snapshot for a newly connected spectator — everything the live companion view needs to render immediately, before any further broadcast arrives. */
+export interface SpectatorJoinedMsg {
+  type: "spectator:joined";
+  roomCode: string;
+  players: PlayerInfo[];
+  phase: RoomPhase;
+  currentGame: GameId | null;
+  games: GameMeta[];
+  standings: Record<string, number>;
+}
+export interface SpectatorJoinRejectedMsg {
+  type: "spectator:join_rejected";
+  reason: "room_not_found";
+}
+/** Relayed to every spectator once the Display forwards its assembled recap data (see DisplayPartyRecapMsg) — lets spectators play the exact same recap everyone else gets. */
+export interface SpectatorPartyRecapMsg {
+  type: "spectator:party_recap";
+  players: PlayerInfo[];
+  standings: Record<string, number>;
+  history: PartyHistoryEntrySnapshot[];
+  achievements: { playerId: string; achievementIds: string[] }[];
+}
+/** Relayed to spectators so their live leaderboard tracks true cross-game cumulative totals — the server itself only ever sees one game's scores at a time (game:over), the running party total only exists on the Display (Router.ts's own standings Map). */
+export interface SpectatorStandingsUpdateMsg {
+  type: "spectator:standings_update";
+  standings: Record<string, number>;
 }
 export interface PlayerProfileResultMsg {
   type: "player:profile_result";
@@ -371,12 +424,15 @@ export type ClientToServerMessage =
   | DisplayRequestAvatarSessionMsg
   | DisplayRequestWildcardMsg
   | DisplayTriggerWaveMsg
+  | DisplayPartyRecapMsg
+  | DisplayStandingsUpdateMsg
   | HostKickPlayerMsg
   | HostPauseGameMsg
   | HostResumeGameMsg
   | PlayerJoinMsg
   | PlayerReconnectMsg
   | PlayerRequestProfileMsg
+  | SpectatorJoinMsg
   | CalibrateAckMsg
   | InputTiltMsg
   | InputPointerMsg
@@ -399,6 +455,10 @@ export type ServerToClientMessage =
   | PlayerJoinedMsg
   | PlayerJoinRejectedMsg
   | PlayerProfileResultMsg
+  | SpectatorJoinedMsg
+  | SpectatorJoinRejectedMsg
+  | SpectatorPartyRecapMsg
+  | SpectatorStandingsUpdateMsg
   | GameAchievementsUnlockedMsg
   | RoomAchievementUnlockedMsg
   | RoomWaveMsg

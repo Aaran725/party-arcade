@@ -44,6 +44,7 @@ export function renderLobbyScreen(
     // The /trust self-signed-CA flow only exists for the LAN path — a real deploy's cert
     // is already properly trusted, so there's nothing to fix there.
     ...(lan ? [el("p", { class: "text-caption" }, ["Tip: phones can visit /trust once to stop future security warnings."])] : []),
+    el("p", { class: "text-caption" }, ["Friend not here? Grab the watch-along link from the ⚙ menu, top right."]),
   ]);
 
   const continueBtn = el("button", { class: "glass-button accent" }, ["Continue to game select →"]);

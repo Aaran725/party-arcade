@@ -149,7 +149,7 @@ export class DisplayRouter {
   }
 
   private syncHostControls(): void {
-    this.hostControls.update(this.playerList(), this.phase === "game", this.paused, this.partyIndex >= 0);
+    this.hostControls.update(this.playerList(), this.phase === "game", this.paused, this.partyIndex >= 0, this.roomCode);
   }
 
   private setPaused(paused: boolean): void {
@@ -505,9 +505,20 @@ export class DisplayRouter {
     this.setGlassTint(null);
     transitionOut(this.root);
     this.triggerWave();
+    const players = this.playerList();
+    const standings = Object.fromEntries(this.standings);
+    // Spectators aren't part of the normal broadcast path — this is the one explicit
+    // round-trip through the server so they get the exact same recap everyone else does.
+    this.socket.send({
+      type: "display:party_recap",
+      players,
+      standings,
+      history: this.partyHistory,
+      achievements: this.achievementsThisParty,
+    });
     renderPartyRecapScreen(this.root, {
-      players: this.playerList(),
-      standings: Object.fromEntries(this.standings),
+      players,
+      standings,
       history: this.partyHistory,
       achievements: this.achievementsThisParty,
       onCard: (line) => this.hostSpeak(line),
@@ -524,6 +535,7 @@ export class DisplayRouter {
       players: this.playerList(),
       standings: finalStandings,
       history: this.partyHistory,
+      achievements: this.achievementsThisParty,
       onNewParty: () => {
         this.partyQueue = [];
         this.partyIndex = -1;
@@ -612,6 +624,10 @@ export class DisplayRouter {
       }
     }
     this.socket.send({ type: "game:over", scores });
+    // Cumulative party standings only ever exist here (this.standings) — the server sees
+    // one game's scores at a time — so this is the one place spectators' live leaderboard
+    // can be kept accurate across multiple games, not just whichever one just ended.
+    this.socket.send({ type: "display:standings_update", standings: Object.fromEntries(this.standings) });
     const highlight = this.stage.getLastHighlight();
     this.stage.stop();
 

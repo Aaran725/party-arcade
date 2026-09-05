@@ -18,6 +18,7 @@ export class HostControls {
   private inParty = false;
   private volume = 0.5;
   private muted = false;
+  private roomCode = "";
 
   constructor(
     private onKick: (playerId: string) => void,
@@ -38,11 +39,12 @@ export class HostControls {
     this.container.append(this.toggleBtn);
   }
 
-  update(players: PlayerInfo[], inGame: boolean, paused: boolean, inParty: boolean): void {
+  update(players: PlayerInfo[], inGame: boolean, paused: boolean, inParty: boolean, roomCode: string): void {
     this.players = players;
     this.inGame = inGame;
     this.paused = paused;
     this.inParty = inParty;
+    this.roomCode = roomCode;
     if (this.panel) this.renderPanel();
   }
 
@@ -99,6 +101,23 @@ export class HostControls {
     waveBtn.addEventListener("click", () => this.onTriggerWave());
     const controlCluster = el("div", { class: "host-controls-cluster" }, [qrBtn, waveBtn]);
 
+    // Distinct from the player-join QR — this link is for someone who isn't physically in
+    // the room (a friend on a call, a parent, someone running late) to watch along without
+    // taking a player slot. A copyable link makes more sense here than a QR code, since the
+    // whole point is they aren't looking at this screen to scan anything off it.
+    const watchBtn = el("button", { class: "glass-button" }, ["🔗 Copy watch-along link"]);
+    watchBtn.addEventListener("click", () => {
+      const url = `${location.origin}/spectate.html?room=${this.roomCode}`;
+      if (navigator.share) {
+        navigator.share({ title: "Party Arcade", url }).catch(() => {});
+        return;
+      }
+      void navigator.clipboard?.writeText(url).then(() => {
+        watchBtn.textContent = "Copied!";
+        setTimeout(() => (watchBtn.textContent = "🔗 Copy watch-along link"), 1800);
+      });
+    });
+
     const audioRow = el("div", { style: "display:flex;align-items:center;gap:0.6em;width:100%" }, [muteBtn, volumeSlider]);
 
     const gameControls: HTMLElement[] = [];
@@ -122,6 +141,7 @@ export class HostControls {
         el("p", { class: "text-caption" }, ["Host controls"]),
         audioRow,
         controlCluster,
+        watchBtn,
         ...gameControls,
         ...(this.players.length ? rows : [el("p", { class: "text-body" }, ["No players yet."])]),
       ],
