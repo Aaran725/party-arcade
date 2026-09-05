@@ -38,7 +38,7 @@ export interface DisplayGameModule {
   /** Optional: AI-generated scenario text, requested via ctx and delivered async — only Plot Twist implements this. */
   onScenarioResult?(scenario: string): void;
   /** Optional: AI-picked mechanic + generated content, requested via ctx and delivered async — only AI Wildcard implements this. */
-  onWildcardResult?(round: { mechanic: WildcardMechanic; prompt: string; choices?: [string, string] }): void;
+  onWildcardResult?(round: { mechanic: WildcardMechanic; prompt: string; choices?: string[] }): void;
   destroy(): void;
 }
 

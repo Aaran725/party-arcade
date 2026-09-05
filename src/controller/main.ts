@@ -2,6 +2,7 @@ import { ArcadeSocket } from "@shared/ws-client";
 import { ControllerRouter } from "./Router";
 import { startLiquidGlassTilt } from "./liquidGlass";
 import { initGlassRefraction } from "@shared/glassRefraction";
+import { registerServiceWorker } from "./registerServiceWorker";
 
 // iOS Safari famously won't reliably arm `:active` CSS states without a real touchstart
 // listener registered somewhere in the document — a no-op listener is enough to satisfy
@@ -11,6 +12,7 @@ document.addEventListener("touchstart", () => {}, { passive: true });
 
 startLiquidGlassTilt();
 initGlassRefraction();
+registerServiceWorker();
 
 const root = document.getElementById("app")!;
 const socket = new ArcadeSocket();

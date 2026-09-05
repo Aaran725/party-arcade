@@ -101,7 +101,7 @@ export class GameStage {
     this.activeModule?.onScenarioResult?.(scenario);
   }
 
-  onWildcardResult(round: { mechanic: WildcardMechanic; prompt: string; choices?: [string, string] }): void {
+  onWildcardResult(round: { mechanic: WildcardMechanic; prompt: string; choices?: string[] }): void {
     this.activeModule?.onWildcardResult?.(round);
   }
 

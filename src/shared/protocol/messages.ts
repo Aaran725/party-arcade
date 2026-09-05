@@ -377,12 +377,12 @@ export interface GameAvatarSessionResultMsg {
   type: "game:avatar_session_result";
   sessionToken: string | null; // null if the Simli API key isn't configured or the request failed
 }
-export type WildcardMechanic = "vote" | "type" | "fast-tap" | "would-you-rather" | "aim";
+export type WildcardMechanic = "vote" | "type" | "fast-tap" | "pick-one" | "aim" | "number-guess";
 export interface GameWildcardResultMsg {
   type: "game:wildcard_result";
   mechanic: WildcardMechanic;
   prompt: string;
-  choices?: [string, string]; // "would-you-rather" only
+  choices?: string[]; // "pick-one" only, 2-4 options
 }
 export interface GameReactionMsg {
   type: "game:reaction";
