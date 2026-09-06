@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { GameId } from "@shared/types/room";
 import { ACHIEVEMENTS, type PlayerStats } from "@shared/achievements";
+import { levelForXp, xpForGame } from "@shared/progression";
 
 // Resolved per call, not at module load, so tests and the chaos runner can point at a
 // throwaway directory via PARTY_ARCADE_DATA_DIR instead of writing into the real
@@ -18,6 +19,12 @@ export interface PlayerProfile extends PlayerStats {
   name: string;
   achievements: string[];
   lastSeen: number;
+  /** Cumulative career total. Level is never stored — always `levelForXp(xp)` (src/shared/progression.ts), so there's no second copy of the number that could disagree with it. */
+  xp: number;
+  /** Consecutive 1st-place finishes, reset to 0 by anything else. Unlike every other field here, this is NOT monotonic — see mergeProfiles below. */
+  currentStreak: number;
+  /** The high-water mark of currentStreak. Monotonic, same as wins/gamesPlayed. */
+  longestStreak: number;
 }
 
 // A flat JSON file, not a database — this is a local party app on someone's home
@@ -34,6 +41,15 @@ function load(): Record<string, PlayerProfile> {
   } catch {
     cache = {}; // first run, or a corrupt/missing file — start fresh rather than crash the server
   }
+  // Rows written before xp/currentStreak/longestStreak existed come back from JSON.parse
+  // without them — there's no schema version to migrate on, so every profile is normalized
+  // exactly once here, the moment it enters memory, rather than scattering `?? 0` at every
+  // call site that happens to read one of these fields.
+  for (const profile of Object.values(cache!)) {
+    profile.xp ??= 0;
+    profile.currentStreak ??= 0;
+    profile.longestStreak ??= 0;
+  }
   return cache!;
 }
 
@@ -48,7 +64,18 @@ export function resetStoreCacheForTests(): void {
 }
 
 function blankProfile(deviceId: string, name: string): PlayerProfile {
-  return { deviceId, name, gamesPlayed: 0, wins: 0, playCounts: {}, winsByGame: {}, achievements: [], lastSeen: Date.now() };
+  return { deviceId, name, gamesPlayed: 0, wins: 0, playCounts: {}, winsByGame: {}, achievements: [], lastSeen: Date.now(), xp: 0, currentStreak: 0, longestStreak: 0 };
+}
+
+/** Profiles written before this field existed come back from JSON.parse without it — there's no schema version to migrate on, so every read of a progression field goes through this rather than trusting the type. */
+function xpOf(p: PlayerProfile): number {
+  return p.xp ?? 0;
+}
+function currentStreakOf(p: PlayerProfile): number {
+  return p.currentStreak ?? 0;
+}
+function longestStreakOf(p: PlayerProfile): number {
+  return p.longestStreak ?? 0;
 }
 
 /**
@@ -68,7 +95,17 @@ function blankProfile(deviceId: string, name: string): PlayerProfile {
  * session the server still owns the writes via recordGameResult.)
  */
 export function mergeProfiles(server: PlayerProfile | undefined, incoming: PlayerProfile): PlayerProfile {
-  if (!server) return { ...incoming, playCounts: { ...incoming.playCounts }, winsByGame: { ...incoming.winsByGame }, achievements: [...incoming.achievements] };
+  if (!server) {
+    return {
+      ...incoming,
+      playCounts: { ...incoming.playCounts },
+      winsByGame: { ...incoming.winsByGame },
+      achievements: [...incoming.achievements],
+      xp: xpOf(incoming),
+      currentStreak: currentStreakOf(incoming),
+      longestStreak: longestStreakOf(incoming),
+    };
+  }
 
   const maxByGame = (a: Partial<Record<GameId, number>>, b: Partial<Record<GameId, number>>): Partial<Record<GameId, number>> => {
     const out: Partial<Record<GameId, number>> = { ...a };
@@ -78,15 +115,24 @@ export function mergeProfiles(server: PlayerProfile | undefined, incoming: Playe
     return out;
   };
 
+  // Whichever side was more recently active — same LWW-by-lastSeen rule `name` already
+  // uses just below. currentStreak is the one field here that genuinely can't take max():
+  // a reset to 0 is a real, correct value, and max() would let a stale phone's old high
+  // streak resurrect itself over a server value that has since correctly reset.
+  const incomingIsFresher = incoming.lastSeen > server.lastSeen;
+
   return {
     deviceId: server.deviceId,
-    name: incoming.lastSeen > server.lastSeen ? incoming.name : server.name,
+    name: incomingIsFresher ? incoming.name : server.name,
     gamesPlayed: Math.max(server.gamesPlayed, incoming.gamesPlayed),
     wins: Math.max(server.wins, incoming.wins),
     playCounts: maxByGame(server.playCounts, incoming.playCounts),
     winsByGame: maxByGame(server.winsByGame, incoming.winsByGame),
     achievements: [...new Set([...server.achievements, ...incoming.achievements])],
     lastSeen: Math.max(server.lastSeen, incoming.lastSeen),
+    xp: Math.max(xpOf(server), xpOf(incoming)),
+    currentStreak: incomingIsFresher ? currentStreakOf(incoming) : currentStreakOf(server),
+    longestStreak: Math.max(longestStreakOf(server), longestStreakOf(incoming)),
   };
 }
 
@@ -117,31 +163,63 @@ export function getProfile(deviceId: string): PlayerProfile | undefined {
   return load()[deviceId];
 }
 
-/** Records one game's result for a device and returns any achievement ids newly unlocked by it (empty if none). */
-export function recordGameResult(deviceId: string, gameId: GameId, rank: number): string[] {
+/** The wire shape both the join and game:over paths send down as player:profile_sync — pulled out once so the two call sites in handlers.ts can't drift apart on which fields they include. */
+export function toStoredProfileSnapshot(profile: PlayerProfile) {
+  return {
+    gamesPlayed: profile.gamesPlayed,
+    wins: profile.wins,
+    playCounts: profile.playCounts,
+    winsByGame: profile.winsByGame,
+    achievements: profile.achievements,
+    lastSeen: profile.lastSeen,
+    xp: profile.xp,
+    currentStreak: profile.currentStreak,
+    longestStreak: profile.longestStreak,
+  };
+}
+
+export interface GameResultOutcome {
+  newlyUnlockedAchievements: string[];
+  /** The new level, only set the frame a game award actually crossed a 100-xp boundary. */
+  leveledUpTo: number | null;
+}
+
+/** Records one game's result for a device: games/wins/XP/streak, plus any achievements newly unlocked by it. */
+export function recordGameResult(deviceId: string, gameId: GameId, rank: number): GameResultOutcome {
   const store = load();
   const profile = store[deviceId] ?? blankProfile(deviceId, "Player");
   store[deviceId] = profile;
+  // load() already normalizes xp/currentStreak/longestStreak on every profile already in
+  // the store; blankProfile() does the same for a brand-new one. Either way the arithmetic
+  // below never adds onto `undefined`.
 
   profile.gamesPlayed += 1;
   profile.playCounts[gameId] = (profile.playCounts[gameId] ?? 0) + 1;
   if (rank === 1) {
     profile.wins += 1;
     profile.winsByGame[gameId] = (profile.winsByGame[gameId] ?? 0) + 1;
+    profile.currentStreak += 1;
+    profile.longestStreak = Math.max(profile.longestStreak, profile.currentStreak);
+  } else {
+    profile.currentStreak = 0;
   }
   profile.lastSeen = Date.now();
 
-  const newlyUnlocked: string[] = [];
+  const levelBefore = levelForXp(profile.xp);
+  profile.xp += xpForGame(rank);
+  const levelAfter = levelForXp(profile.xp);
+
+  const newlyUnlockedAchievements: string[] = [];
   for (const achievement of ACHIEVEMENTS) {
     if (profile.achievements.includes(achievement.id)) continue;
     if (achievement.check(profile)) {
       profile.achievements.push(achievement.id);
-      newlyUnlocked.push(achievement.id);
+      newlyUnlockedAchievements.push(achievement.id);
     }
   }
 
   persist();
-  return newlyUnlocked;
+  return { newlyUnlockedAchievements, leveledUpTo: levelAfter > levelBefore ? levelAfter : null };
 }
 
 export interface HallOfFameEntry {
@@ -149,6 +227,10 @@ export interface HallOfFameEntry {
   wins: number;
   gamesPlayed: number;
   achievementCount: number;
+  /** Summed across every device grouped under this name — same spirit as wins/gamesPlayed below. Level is derived client-side from this via levelForXp, never sent as its own number. */
+  xp: number;
+  /** The best streak this name has ever reached on ANY of its devices — a max across the group, same as longestStreak's own merge rule. */
+  longestStreak: number;
 }
 
 /**
@@ -164,7 +246,10 @@ export interface HallOfFameEntry {
  */
 export function getHallOfFame(limit = 20): HallOfFameEntry[] {
   const store = load();
-  const byName = new Map<string, { name: string; wins: number; gamesPlayed: number; achievements: Set<string> }>();
+  const byName = new Map<
+    string,
+    { name: string; wins: number; gamesPlayed: number; achievements: Set<string>; xp: number; longestStreak: number }
+  >();
 
   for (const profile of Object.values(store)) {
     if (profile.gamesPlayed <= 0) continue; // joined but never finished a game — nothing to rank
@@ -173,14 +258,23 @@ export function getHallOfFame(limit = 20): HallOfFameEntry[] {
     if (row) {
       row.wins += profile.wins;
       row.gamesPlayed += profile.gamesPlayed;
+      row.xp += profile.xp;
+      row.longestStreak = Math.max(row.longestStreak, profile.longestStreak);
       for (const id of profile.achievements) row.achievements.add(id);
     } else {
-      byName.set(key, { name: profile.name, wins: profile.wins, gamesPlayed: profile.gamesPlayed, achievements: new Set(profile.achievements) });
+      byName.set(key, {
+        name: profile.name,
+        wins: profile.wins,
+        gamesPlayed: profile.gamesPlayed,
+        achievements: new Set(profile.achievements),
+        xp: profile.xp,
+        longestStreak: profile.longestStreak,
+      });
     }
   }
 
   return [...byName.values()]
-    .map((r) => ({ name: r.name, wins: r.wins, gamesPlayed: r.gamesPlayed, achievementCount: r.achievements.size }))
+    .map((r) => ({ name: r.name, wins: r.wins, gamesPlayed: r.gamesPlayed, achievementCount: r.achievements.size, xp: r.xp, longestStreak: r.longestStreak }))
     .sort((a, b) => b.wins - a.wins || b.achievementCount - a.achievementCount)
     .slice(0, limit);
 }

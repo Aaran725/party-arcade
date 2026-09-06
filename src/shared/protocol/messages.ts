@@ -109,6 +109,10 @@ export interface StoredProfileSnapshot {
   winsByGame: Partial<Record<GameId, number>>;
   achievements: string[];
   lastSeen: number;
+  /** Cumulative career total. Level is derived client-side via levelForXp (src/shared/progression.ts), never sent as its own field. */
+  xp: number;
+  currentStreak: number;
+  longestStreak: number;
 }
 export interface PlayerRequestProfileMsg {
   type: "player:request_profile";
@@ -125,6 +129,7 @@ export interface DisplayPartyRecapMsg {
   standings: Record<string, number>;
   history: PartyHistoryEntrySnapshot[];
   achievements: { playerId: string; achievementIds: string[] }[];
+  levelUps: { playerId: string; level: number }[];
 }
 /** Sent whenever the Display's own cumulative party standings change (see Router.ts's endGame()) — relayed to spectators so their live leaderboard stays accurate across multiple games, not just the current one. */
 export interface DisplayStandingsUpdateMsg {
@@ -264,6 +269,7 @@ export interface SpectatorPartyRecapMsg {
   standings: Record<string, number>;
   history: PartyHistoryEntrySnapshot[];
   achievements: { playerId: string; achievementIds: string[] }[];
+  levelUps: { playerId: string; level: number }[];
 }
 /** Relayed to spectators so their live leaderboard tracks true cross-game cumulative totals — the server itself only ever sees one game's scores at a time (game:over), the running party total only exists on the Display (Router.ts's own standings Map). */
 export interface SpectatorStandingsUpdateMsg {
@@ -288,6 +294,9 @@ export interface PlayerProfileResultMsg {
   achievements: string[];
   /** Resolved server-side (GAME_REGISTRY has the titles) so the controller doesn't need its own id->title lookup table. */
   favoriteGameTitle: string | null;
+  xp: number;
+  currentStreak: number;
+  longestStreak: number;
 }
 export interface GameAchievementsUnlockedMsg {
   type: "game:achievements_unlocked";
@@ -298,6 +307,17 @@ export interface RoomAchievementUnlockedMsg {
   type: "room:achievement_unlocked";
   playerId: string;
   achievementIds: string[];
+}
+/** Same pair-shape as the achievement messages above: a unicast to the player's own controller... */
+export interface GameLeveledUpMsg {
+  type: "game:leveled_up";
+  level: number;
+}
+/** ...and a host broadcast so the Party Recap Reel can show who leveled up this session, mirroring RoomAchievementUnlockedMsg exactly. */
+export interface RoomLeveledUpMsg {
+  type: "room:leveled_up";
+  playerId: string;
+  level: number;
 }
 /** One controller's cue for the synchronized phone wave — staggerIndex is that player's position in the room's stable join order, staggerMs is the per-step delay; the controller waits staggerIndex * staggerMs before flashing/vibrating/sounding. color is that player's own avatar color, so the wave carries everyone's identity around the room instead of one flat flash. */
 export interface RoomWaveMsg {
@@ -390,6 +410,9 @@ export interface HallOfFameEntrySnapshot {
   wins: number;
   gamesPlayed: number;
   achievementCount: number;
+  /** Summed across every device grouped under this name — level is derived from it via levelForXp, never sent as its own field. */
+  xp: number;
+  longestStreak: number;
 }
 export interface GameHallOfFameResultMsg {
   type: "game:hall_of_fame_result";
@@ -503,6 +526,8 @@ export type ServerToClientMessage =
   | SpectatorStandingsUpdateMsg
   | GameAchievementsUnlockedMsg
   | RoomAchievementUnlockedMsg
+  | GameLeveledUpMsg
+  | RoomLeveledUpMsg
   | RoomWaveMsg
   | PlayerReconnectedMsg
   | PlayerReconnectFailedMsg

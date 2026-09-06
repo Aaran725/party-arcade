@@ -13,6 +13,7 @@ export function renderPartyRecapScreen(
     standings: Record<string, number>;
     history: PartyHistoryEntry[];
     achievements: { playerId: string; achievementIds: string[] }[];
+    levelUps: { playerId: string; level: number }[];
     onDone: () => void;
     /** Fired once per card as it's shown — the caller wires this to the AI Leader's hostSpeak(), a silent no-op when the Leader isn't on. */
     onCard?: (line: string) => void;

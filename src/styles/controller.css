@@ -67,6 +67,26 @@ html, body {
   border-color: var(--accent-2);
 }
 
+/* A one-directional fill for the Career screen's XP bar. No existing meter fit: the
+   push-battle canvas meter is bidirectional/decaying, and the mic-level DOM meter is a
+   vertical height-fill built for live audio — this is the simplest new component, built
+   from the same .glass-pill chrome (color-mix, --radius-pill) every other pill here uses. */
+.xp-bar-track {
+  width: 100%;
+  height: 0.6em;
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+}
+
+.xp-bar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 70%, transparent), var(--accent));
+  transition: width 400ms ease;
+}
+
 .achievement-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

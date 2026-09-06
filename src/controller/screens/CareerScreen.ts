@@ -1,6 +1,7 @@
 import { el } from "@shared/dom";
 import { createAvatarSvg } from "@shared/avatar";
 import { ACHIEVEMENTS } from "@shared/achievements";
+import { levelForXp, xpForNextLevel } from "@shared/progression";
 import type { GameId } from "@shared/types/room";
 import { vibrate } from "../input/haptics";
 
@@ -11,6 +12,9 @@ export interface CareerData {
   winsByGame: Partial<Record<GameId, number>>;
   achievements: string[];
   favoriteGameTitle: string | null;
+  xp: number;
+  currentStreak: number;
+  longestStreak: number;
 }
 
 export function renderCareerScreen(
@@ -43,6 +47,14 @@ export function renderCareerScreen(
       el("span", { class: "text-caption" }, [label]),
     ]);
 
+  const level = levelForXp(data.xp);
+  const { current, needed } = xpForNextLevel(data.xp);
+  const xpBar = el("div", { style: "display:flex;flex-direction:column;align-items:center;gap:0.4em;width:100%" }, [
+    el("div", { class: "glass-pill" }, [`⭐ Level ${level}`]),
+    el("div", { class: "xp-bar-track" }, [el("div", { class: "xp-bar-fill", style: `width:${(current / needed) * 100}%` })]),
+    el("span", { class: "text-caption" }, [`${current} / ${needed} XP to next level`]),
+  ]);
+
   const cards = ACHIEVEMENTS.map((a) => {
     const unlocked = data.achievements.includes(a.id);
     return el("div", { class: `achievement-card${unlocked ? " unlocked" : ""}` }, [
@@ -56,10 +68,14 @@ export function renderCareerScreen(
     el("div", { class: "glass-panel controller-panel anim-pop-in", style: "align-items:center;gap:1.2em" }, [
       createAvatarSvg(opts.id, opts.color, { size: "3.4em" }),
       el("h2", { class: "title-md" }, [`${opts.name}'s Career`]),
-      el("div", { style: "display:flex;gap:1.6em;justify-content:center" }, [
+      xpBar,
+      el("div", { style: "display:flex;gap:1.6em;justify-content:center;flex-wrap:wrap" }, [
         stat(`${data.gamesPlayed}`, "Played"),
         stat(`${data.wins}`, "Wins"),
         stat(`${winRate}%`, "Win rate"),
+        // A permanent "Streak: 0" reads as a failure state, not a stat worth showing —
+        // only surfaced while there's actually something live to show off.
+        ...(data.currentStreak > 0 ? [stat(`${data.currentStreak}🔥`, "Win streak")] : []),
       ]),
       ...(data.favoriteGameTitle ? [el("p", { class: "text-caption" }, [`Most played: ${data.favoriteGameTitle}`])] : []),
       el("div", { class: "achievement-grid" }, cards),

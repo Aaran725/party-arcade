@@ -27,6 +27,7 @@ export function renderPartyFinaleScreen(
     teamStandings?: Record<string, number>;
     /** Only needed for the shareable recap image's achievement badges — the on-screen finale itself doesn't show them. */
     achievements?: { playerId: string; achievementIds: string[] }[];
+    levelUps?: { playerId: string; level: number }[];
   },
 ): void {
   const ranked = Object.entries(opts.standings).sort((a, b) => b[1] - a[1]);
@@ -70,6 +71,7 @@ export function renderPartyFinaleScreen(
         standings: opts.standings,
         history: opts.history,
         achievements: opts.achievements ?? [],
+        levelUps: opts.levelUps ?? [],
       });
       const blob = await (await fetch(dataUrl)).blob();
       const file = new File([blob], "party-recap.png", { type: "image/png" });

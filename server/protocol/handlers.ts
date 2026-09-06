@@ -14,7 +14,7 @@ import { getScenario } from "../ai/generateScenario";
 import { textToSpeech } from "../ai/textToSpeech";
 import { createAvatarSession } from "../ai/simliSession";
 import { getWildcard } from "../ai/generateWildcard";
-import { ensureProfile, getProfile, recordGameResult, getHallOfFame, restoreProfile } from "../storage/playerStore";
+import { ensureProfile, getProfile, recordGameResult, getHallOfFame, restoreProfile, toStoredProfileSnapshot } from "../storage/playerStore";
 import { saveSnapshot, loadSnapshot } from "../rooms/roomSnapshot";
 
 export interface ConnectionState {
@@ -208,17 +208,7 @@ export function handleMessage(
       if (profile) {
         // Echo the merged profile back so the phone's own copy converges with the server's
         // — otherwise the two would drift apart the moment either side learned something new.
-        sendTo(socket, {
-          type: "player:profile_sync",
-          profile: {
-            gamesPlayed: profile.gamesPlayed,
-            wins: profile.wins,
-            playCounts: profile.playCounts,
-            winsByGame: profile.winsByGame,
-            achievements: profile.achievements,
-            lastSeen: profile.lastSeen,
-          },
-        });
+        sendTo(socket, { type: "player:profile_sync", profile: toStoredProfileSnapshot(profile) });
       }
 
       sendToHost(room, { type: "room:player_joined", player: toPlayerInfo(playerId, room.players.get(playerId)!) });
@@ -427,6 +417,7 @@ export function handleMessage(
         standings: msg.standings,
         history: msg.history,
         achievements: msg.achievements,
+        levelUps: msg.levelUps,
       });
       return;
     }
@@ -543,30 +534,26 @@ export function handleMessage(
         for (const [playerId, rank] of ranks) {
           const player = room.players.get(playerId);
           if (!player) continue;
-          const newlyUnlocked = recordGameResult(player.deviceId, room.currentGame, rank);
-          if (newlyUnlocked.length > 0) {
-            sendTo(player.socket, { type: "game:achievements_unlocked", achievementIds: newlyUnlocked });
+          const { newlyUnlockedAchievements, leveledUpTo } = recordGameResult(player.deviceId, room.currentGame, rank);
+          if (newlyUnlockedAchievements.length > 0) {
+            sendTo(player.socket, { type: "game:achievements_unlocked", achievementIds: newlyUnlockedAchievements });
             // The Display never otherwise learns about achievements (they're normally a
             // controller-only unicast) — the Party Recap Reel needs to know what unlocked
             // this session to show it at the end.
-            sendToHost(room, { type: "room:achievement_unlocked", playerId, achievementIds: newlyUnlocked });
+            sendToHost(room, { type: "room:achievement_unlocked", playerId, achievementIds: newlyUnlockedAchievements });
+          }
+          if (leveledUpTo !== null) {
+            // Same unicast+host-broadcast pair as achievements, immediately above — the
+            // Recap Reel collects both the same way.
+            sendTo(player.socket, { type: "game:leveled_up", level: leveledUpTo });
+            sendToHost(room, { type: "room:leveled_up", playerId, level: leveledUpTo });
           }
           // Push the updated profile down after every game, not just on join. Syncing only
           // at join would mean a whole night's progress lived solely in a store that a
           // cold start can erase before the phone ever reconnects to re-save it.
           const updated = getProfile(player.deviceId);
           if (updated) {
-            sendTo(player.socket, {
-              type: "player:profile_sync",
-              profile: {
-                gamesPlayed: updated.gamesPlayed,
-                wins: updated.wins,
-                playCounts: updated.playCounts,
-                winsByGame: updated.winsByGame,
-                achievements: updated.achievements,
-                lastSeen: updated.lastSeen,
-              },
-            });
+            sendTo(player.socket, { type: "player:profile_sync", profile: toStoredProfileSnapshot(updated) });
           }
         }
       }
@@ -610,6 +597,9 @@ export function handleMessage(
         winsByGame: profile?.winsByGame ?? {},
         achievements: profile?.achievements ?? [],
         favoriteGameTitle: favoriteId ? (getGameMeta(favoriteId)?.title ?? null) : null,
+        xp: profile?.xp ?? 0,
+        currentStreak: profile?.currentStreak ?? 0,
+        longestStreak: profile?.longestStreak ?? 0,
       });
       return;
     }

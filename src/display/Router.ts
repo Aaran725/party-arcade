@@ -83,6 +83,7 @@ export class DisplayRouter {
   private partyIndex = -1; // -1 = not in a party
   private partyHistory: PartyHistoryEntry[] = [];
   private achievementsThisParty: { playerId: string; achievementIds: string[] }[] = [];
+  private levelUpsThisParty: { playerId: string; level: number }[] = [];
   private standingsBeforeCurrentGame: Record<string, number> = {};
 
   private teams: TeamAssignments | null = null;
@@ -348,6 +349,7 @@ export class DisplayRouter {
         this.partyIndex = -1;
         this.partyHistory = [];
         this.achievementsThisParty = [];
+        this.levelUpsThisParty = [];
         this.standingsBeforeCurrentGame = {};
         this.renderLobby();
         this.syncHostControls();
@@ -435,6 +437,10 @@ export class DisplayRouter {
         this.achievementsSinceLastGame++;
         return;
 
+      case "room:leveled_up":
+        this.levelUpsThisParty.push({ playerId: msg.playerId, level: msg.level });
+        return;
+
       case "error":
         console.warn("[arcade] server error:", msg.code, msg.message);
         this.showErrorToast(msg.message);
@@ -496,6 +502,7 @@ export class DisplayRouter {
     this.partyIndex = -1;
     this.partyHistory = [];
     this.achievementsThisParty = [];
+    this.levelUpsThisParty = [];
     this.standings.clear();
     this.standingsBeforeCurrentGame = {};
     this.teams = teams;
@@ -579,12 +586,14 @@ export class DisplayRouter {
       standings,
       history: this.partyHistory,
       achievements: this.achievementsThisParty,
+      levelUps: this.levelUpsThisParty,
     });
     renderPartyRecapScreen(this.root, {
       players,
       standings,
       history: this.partyHistory,
       achievements: this.achievementsThisParty,
+      levelUps: this.levelUpsThisParty,
       onCard: (line) => this.hostSpeak(line),
       onDone: () => this.renderPartyFinale(),
     });
@@ -600,11 +609,13 @@ export class DisplayRouter {
       standings: finalStandings,
       history: this.partyHistory,
       achievements: this.achievementsThisParty,
+      levelUps: this.levelUpsThisParty,
       onNewParty: () => {
         this.partyQueue = [];
         this.partyIndex = -1;
         this.partyHistory = [];
         this.achievementsThisParty = [];
+        this.levelUpsThisParty = [];
         this.teams = null;
         this.teamStandings.clear();
         this.renderSelect();
@@ -627,6 +638,7 @@ export class DisplayRouter {
     this.partyIndex = -1;
     this.partyHistory = [];
     this.achievementsThisParty = [];
+    this.levelUpsThisParty = [];
     this.standingsBeforeCurrentGame = {};
     this.teams = null;
     this.teamStandings.clear();

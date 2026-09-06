@@ -109,12 +109,14 @@ export class SpectatorRouter {
           standings: msg.standings,
           history: msg.history,
           achievements: msg.achievements,
+          levelUps: msg.levelUps,
           onDone: () =>
             renderPartyFinaleScreen(this.root, {
               players: msg.players,
               standings: msg.standings,
               history: msg.history,
               achievements: msg.achievements,
+              levelUps: msg.levelUps,
               onNewParty: () => this.renderLive(),
             }),
         });

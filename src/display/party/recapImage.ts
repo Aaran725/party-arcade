@@ -51,6 +51,7 @@ export async function renderRecapImageCard(opts: {
   standings: Record<string, number>;
   history: PartyHistoryEntry[];
   achievements: { playerId: string; achievementIds: string[] }[];
+  levelUps: { playerId: string; level: number }[];
 }): Promise<string> {
   const cards = buildCards(opts).slice(0, MAX_CARDS);
 

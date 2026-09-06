@@ -107,6 +107,7 @@ export class ControllerRouter {
   private pauseBanner: HTMLElement | null = null;
   private deviceId: string;
   private achievementToast: HTMLElement | null = null;
+  private levelUpToast: HTMLElement | null = null;
   private roster = new Map<string, PlayerInfo>();
 
   private factories: Record<GameId, ModuleFactory> = {
@@ -442,6 +443,10 @@ export class ControllerRouter {
       case "game:achievements_unlocked":
         this.showAchievementToast(msg.achievementIds);
         return;
+
+      case "game:leveled_up":
+        this.showLevelUpToast(msg.level);
+        return;
     }
   }
 
@@ -479,6 +484,22 @@ export class ControllerRouter {
     setTimeout(() => {
       this.achievementToast?.remove();
       this.achievementToast = null;
+    }, 4000);
+  }
+
+  /** Same shape and timing as showAchievementToast above — a level-up gets the identical immediate-phone-toast-plus-later-Recap-Reel-card treatment an achievement unlock already gets, no new interruption pattern invented for it. */
+  private showLevelUpToast(level: number): void {
+    vibrate([30, 60, 30]);
+    this.levelUpToast?.remove();
+    this.levelUpToast = el(
+      "div",
+      { class: "glass-panel anim-pop-in", style: "position:fixed;top:max(4em, env(safe-area-inset-top));left:1em;right:1em;z-index:15;padding:0.8em 1em;text-align:center" },
+      [el("p", { class: "text-body" }, [`⬆️ Level ${level}!`])],
+    );
+    document.body.append(this.levelUpToast);
+    setTimeout(() => {
+      this.levelUpToast?.remove();
+      this.levelUpToast = null;
     }, 4000);
   }
 

@@ -1,5 +1,6 @@
 import { el } from "@shared/dom";
 import type { HallOfFameEntrySnapshot } from "@shared/protocol/messages";
+import { levelForXp } from "@shared/progression";
 
 /**
  * A real, TV-visible shared scoreboard — the first place any device's stats
@@ -16,6 +17,9 @@ export function renderHallOfFameScreen(root: HTMLElement, opts: { entries: HallO
     el("div", { class: "glass-pill scoreboard-row anim-pop-in" }, [
       el("span", { class: "rank" }, [`${i + 1}`]),
       el("span", { style: "flex:1" }, [entry.name]),
+      el("span", { class: "text-caption" }, [`Lv.${levelForXp(entry.xp)}`]),
+      // Only worth a tag once it's a real streak — an additive small tag, not a layout rework.
+      ...(entry.longestStreak >= 3 ? [el("span", { class: "text-caption" }, [`🔥 ${entry.longestStreak}`])] : []),
       el("span", { class: "text-caption" }, [`${entry.gamesPlayed} played`]),
       el("span", { class: "text-caption" }, [`${entry.achievementCount} 🎖️`]),
       el("span", { class: "mono" }, [`${entry.wins} wins`]),

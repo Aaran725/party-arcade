@@ -29,6 +29,7 @@ export function buildCards(opts: {
   standings: Record<string, number>;
   history: PartyHistoryEntry[];
   achievements: { playerId: string; achievementIds: string[] }[];
+  levelUps: { playerId: string; level: number }[];
 }): Card[] {
   const cards: Card[] = [
     { icon: "🎬", title: "Party Recap", body: `${opts.history.length} game${opts.history.length === 1 ? "" : "s"} played tonight`, line: "Alright, let's relive tonight's highlights before we crown a winner." },
@@ -99,6 +100,16 @@ export function buildCards(opts: {
       title: "Achievements Unlocked",
       body: lines.join(" · "),
       line: "And a few achievements were unlocked tonight too — nice work, everyone.",
+    });
+  }
+
+  if (opts.levelUps.length > 0) {
+    const lines = opts.levelUps.map(({ playerId, level }) => `${nameOf(opts.players, playerId)} → Level ${level}`);
+    cards.push({
+      icon: "⬆️",
+      title: "Leveled Up",
+      body: lines.join(" · "),
+      line: "A few of you leveled up tonight too.",
     });
   }
 
